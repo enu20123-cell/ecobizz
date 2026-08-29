@@ -24,6 +24,7 @@
         <span class="unit">тенге/кВт·ч</span>
       </label>
       <button id="sample-btn" class="btn ghost" type="button">Загрузить пример</button>
+      <button id="sample-multi-btn" class="btn ghost" type="button">Пример: вода + тепло</button>
       <button id="upload-btn" class="btn primary" type="button">
         Загрузить CSV / Excel
         <input id="file-input" type="file" accept=".csv,.xlsx,.xls" hidden />
@@ -54,6 +55,10 @@
           <strong id="baseline-chip" class="chip"></strong>
           <span class="muted">(25-й перцентиль потребления в нерабочие дни × <span id="multiplier-chip">1.5</span>)</span>
         </p>
+
+        <div id="weather-badge" class="weather-badge hidden"></div>
+
+        <div id="resource-switcher" class="seg resource-switcher hidden" role="tablist" aria-label="Ресурс"></div>
 
         <section id="insight" class="insight hidden"></section>
 
@@ -129,6 +134,7 @@
           <div id="insight-loading" class="loading hidden">
             <span class="spinner" aria-hidden="true"></span> Копилот готовит🔥🔥🔥...
           </div>
+          <div id="ai-data-block" class="ai-data-block hidden"></div>
           <p id="insight-text" class="insight-text hidden"></p>
         </section>
       </section>
@@ -160,6 +166,18 @@
       </section>
 
       <section id="tab-method" class="tab-panel hidden" role="tabpanel">
+        <section class="card">
+          <div class="card-head"><h2>Что отличает этот проект</h2></div>
+          <div class="method-text">
+            <ul class="highlights">
+              <li>Детекция аномалий с учётом погоды — обогрев в мороз не путается с потерей.</li>
+              <li>Мультиресурсность: электричество, вода и тепло — одна и та же статистика для каждого.</li>
+              <li>Честный ИИ: Gemini получает только проверенные цифры и не придумывает числа.</li>
+              <li>Доставка результата прямо в Telegram, без отдельного визита на сайт.</li>
+            </ul>
+          </div>
+        </section>
+
         <section class="card">
           <div class="card-head"><h2>Как работает детекция</h2></div>
           <div class="method-text">

@@ -9,6 +9,7 @@ the building was clearly running as if it were occupied.
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from calendar_utils import add_workday_column, load_off_periods_from_json
@@ -49,25 +50,42 @@ def load_data(file_path_or_buffer, *, filename: str | None = None) -> pd.DataFra
     return add_workday_column(df, extra_off_periods=calendar_periods)
 
 
-def get_baseline(df: pd.DataFrame) -> float:
-    """Closed-building baseline = 25th percentile of non-working-day consumption."""
-    off_days = df.loc[df["is_workday"] == 0, "consumption_kwh"]
+def get_baseline(df: pd.DataFrame, value_column: str = "consumption_kwh") -> float:
+    """Closed-building baseline = 25th percentile of non-working-day consumption.
+
+    `value_column` picks which reading to build the baseline from — the
+    statistic itself (25th percentile) never changes, only the column it
+    reads, so the same call works for electricity, water or heat.
+    """
+    off_days = df.loc[df["is_workday"] == 0, value_column]
     if off_days.empty:
         raise ValueError("No non-working days found; cannot build a baseline.")
     return float(off_days.quantile(0.25))
 
 
-def detect_anomalies(df: pd.DataFrame, multiplier: float = BASELINE_MULTIPLIER) -> pd.DataFrame:
-    """Flag non-working days whose consumption exceeds the closed-building baseline.
+def detect_anomalies(
+    df: pd.DataFrame,
+    multiplier: float = BASELINE_MULTIPLIER,
+    value_column: str = "consumption_kwh",
+) -> pd.DataFrame:
+    """Flag non-working days whose reading exceeds the closed-building baseline.
 
-    Baseline = 25th percentile of non-working-day consumption, i.e. a day
+    Baseline = 25th percentile of non-working-day readings, i.e. a day
     where everything was properly switched off. A robust statistic is used
     so the baseline is not inflated by the very waste we are detecting.
     A day is an anomaly when is_workday == 0 and
-    consumption_kwh > baseline * multiplier (defaults to BASELINE_MULTIPLIER;
+    value > baseline * multiplier (defaults to BASELINE_MULTIPLIER;
     exposed as a parameter so the UI's threshold slider can explore other
     values without duplicating this logic).
-    Adds boolean `is_anomaly` and `excess_kwh` (kWh above baseline, else 0).
+    Adds boolean `is_anomaly` and `excess_kwh` (units above baseline, else 0).
+
+    `value_column` defaults to electricity's `consumption_kwh`; pass
+    `"water_m3"` or `"heat_gcal"` to run the exact same detection against a
+    different resource column — the logic and thresholds are identical, only
+    the input column changes. The output columns stay named `is_anomaly` /
+    `excess_kwh` regardless of resource: each resource is detected into its
+    own returned DataFrame copy rather than merged together, so callers
+    processing multiple resources call this once per resource.
 
     `df.attrs["baseline_reliable"]` is False when fewer than
     MIN_OFF_DAY_SAMPLES non-working days are available — the result is still
@@ -75,16 +93,63 @@ def detect_anomalies(df: pd.DataFrame, multiplier: float = BASELINE_MULTIPLIER) 
     of presenting the baseline as a confirmed fact.
     """
     df = df.copy()
-    off_days = df.loc[df["is_workday"] == 0, "consumption_kwh"]
-    baseline = get_baseline(df)
+    off_days = df.loc[df["is_workday"] == 0, value_column]
+    baseline = get_baseline(df, value_column=value_column)
 
     over_baseline = (df["is_workday"] == 0) & (
-        df["consumption_kwh"] > baseline * multiplier
+        df[value_column] > baseline * multiplier
     )
     df["is_anomaly"] = over_baseline
-    df["excess_kwh"] = (df["consumption_kwh"] - baseline).where(over_baseline, 0.0)
+    df["excess_kwh"] = (df[value_column] - baseline).where(over_baseline, 0.0)
     df.attrs["baseline_reliable"] = len(off_days) >= MIN_OFF_DAY_SAMPLES
     df.attrs["off_day_samples"] = int(len(off_days))
+    return df
+
+
+def detect_anomalies_weather_adjusted(
+    df: pd.DataFrame,
+    hdd_by_date: dict,
+    multiplier: float = BASELINE_MULTIPLIER,
+    value_column: str = "consumption_kwh",
+) -> pd.DataFrame | None:
+    """Weather-corrected variant of detect_anomalies().
+
+    A flat baseline treats every non-working day the same, which means a
+    cold day where the heating legitimately worked a bit harder looks just
+    like a building that was simply left switched on. This instead fits a
+    linear regression of non-working-day consumption against heating-degree-
+    days (HDD = max(0, 18°C - mean daily temperature)):
+
+        expected(day) = intercept + slope * HDD(day)
+
+    A day is an anomaly when its actual reading exceeds
+    `expected(day) * multiplier` — i.e. relative to the point on *this* line
+    for that day's own HDD, not one single number for the whole dataset.
+
+    `hdd_by_date` maps ISO date strings ("YYYY-MM-DD") to HDD values (see
+    weather.py). Returns None — instead of a half-broken result — when there
+    are too few non-working days with known HDD, or their HDD values do not
+    vary enough to fit a meaningful line; callers should fall back to
+    detect_anomalies() in that case.
+    """
+    df = df.copy()
+    off_mask = df["is_workday"] == 0
+    hdd_series = df["date"].dt.strftime("%Y-%m-%d").map(hdd_by_date)
+
+    off_hdd = hdd_series[off_mask].dropna()
+    if len(off_hdd) < MIN_OFF_DAY_SAMPLES or off_hdd.nunique() < 2:
+        return None
+
+    off_values = df.loc[off_hdd.index, value_column].astype(float)
+    slope, intercept = np.polyfit(off_hdd.astype(float), off_values, 1)
+
+    expected = intercept + slope * hdd_series.astype(float)
+    over_baseline = off_mask & hdd_series.notna() & (df[value_column] > expected * multiplier)
+
+    df["is_anomaly"] = over_baseline
+    df["excess_kwh"] = (df[value_column] - expected).where(over_baseline, 0.0)
+    df.attrs["baseline_reliable"] = True
+    df.attrs["off_day_samples"] = int(len(off_hdd))
     return df
 
 

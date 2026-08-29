@@ -17,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 
+import config
+import weather
 from calendar_utils import add_workday_column, load_off_periods_from_json
 from core import (
     BASELINE_MULTIPLIER,
@@ -25,13 +27,23 @@ from core import (
     TARIFF_KZT_PER_KWH,
     calculate_impact,
     detect_anomalies,
+    detect_anomalies_weather_adjusted,
     get_baseline,
 )
-from backend.schemas import AnalyzeResponse, DayRecord, InsightRequest, InsightResponse, Summary
+from backend.schemas import (
+    AnalyzeResponse,
+    DayRecord,
+    InsightRequest,
+    InsightResponse,
+    ResourceRecord,
+    ResourceSummary,
+    Summary,
+)
 from backend.ai import AIUnavailable, ask_gemini
 
 ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_CSV = ROOT / "data" / "sample_data.csv"
+SAMPLE_MULTI_CSV = ROOT / "data" / "sample_data_multi.csv"
 FRONTEND_DIR = ROOT / "frontend"
 # is_workday is optional: when the upload omits it, we derive it from weekends
 # plus the Kazakhstan public-holiday/school-break calendar (holidays_kz.json).
@@ -41,6 +53,35 @@ ALLOWED_SUFFIXES = (".csv", ".xlsx", ".xls")
 # aliases to our canonical name before validating — the numbers themselves
 # are never touched, only the header.
 CONSUMPTION_KWH_ALIASES = {"kwh", "consumption", "usage_kwh", "energy_kwh", "kwh_consumed"}
+
+# Water and heat are entirely optional columns — a file with only
+# date/consumption_kwh keeps working exactly as before. When present, each
+# resource is detected independently with the exact same statistic
+# (core.detect_anomalies), just pointed at a different column.
+RESOURCE_META = {
+    "electricity": {
+        "value_column": "consumption_kwh",
+        "label": "Электричество",
+        "unit": "кВт·ч",
+        "default_tariff": TARIFF_KZT_PER_KWH,
+        "co2_factor": CO2_KG_PER_KWH,
+    },
+    "water": {
+        "value_column": "water_m3",
+        "label": "Вода",
+        "unit": "м³",
+        "default_tariff": config.WATER_TARIFF_KZT_PER_M3_DEMO,
+        "co2_factor": None,
+    },
+    "heat": {
+        "value_column": "heat_gcal",
+        "label": "Тепло",
+        "unit": "Гкал",
+        "default_tariff": config.HEAT_TARIFF_KZT_PER_GCAL_DEMO,
+        "co2_factor": config.HEAT_CO2_KG_PER_GCAL_DEMO,
+    },
+}
+OPTIONAL_RESOURCE_COLUMNS = {"water_m3": "вода (м³)", "heat_gcal": "тепло (Гкал)"}
 
 app = FastAPI(title="EcoBiz Copilot", version="2.1.0")
 app.add_middleware(
@@ -90,6 +131,16 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
             f"{bad_kwh} неверных значений кВт·ч.",
         )
 
+    for column, label in OPTIONAL_RESOURCE_COLUMNS.items():
+        if column not in out.columns:
+            continue
+        out[column] = pd.to_numeric(out[column], errors="coerce")
+        bad = int(out[column].isna().sum())
+        if bad:
+            raise HTTPException(
+                422, f"Некорректные значения: {bad} неверных значений в колонке «{label}»."
+            )
+
     if "is_workday" in out.columns:
         workday = pd.to_numeric(out["is_workday"], errors="coerce")
         if workday.isna().any():
@@ -101,9 +152,97 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _analyze(df: pd.DataFrame, tariff: float, multiplier: float) -> AnalyzeResponse:
-    """Run the full pipeline and shape a JSON-friendly response."""
-    flagged = detect_anomalies(df, multiplier=multiplier)
+def _build_resource_summary(
+    df: pd.DataFrame,
+    key: str,
+    *,
+    tariff: float | None = None,
+    multiplier: float = BASELINE_MULTIPLIER,
+    precomputed: pd.DataFrame | None = None,
+) -> ResourceSummary:
+    """Run the shared detection pipeline for one resource and shape it into
+    the resource-agnostic block used by AnalyzeResponse.resources.
+
+    `precomputed` lets the caller reuse a DataFrame already flagged by
+    detect_anomalies() (or its weather-adjusted variant) instead of running
+    detection twice for electricity.
+    """
+    meta = RESOURCE_META[key]
+    flagged = (
+        precomputed
+        if precomputed is not None
+        else detect_anomalies(df, multiplier=multiplier, value_column=meta["value_column"])
+    )
+    resource_tariff = tariff if tariff is not None else meta["default_tariff"]
+    impact = calculate_impact(
+        flagged, tariff=resource_tariff, co2_kg_per_kwh=meta["co2_factor"] or 0.0
+    )
+
+    series = [
+        ResourceRecord(
+            date=row.date.strftime("%Y-%m-%d"),
+            value=round(float(getattr(row, meta["value_column"])), 2),
+            is_workday=bool(row.is_workday),
+            is_anomaly=bool(row.is_anomaly),
+            excess=round(float(row.excess_kwh), 2),
+        )
+        for row in flagged.itertuples(index=False)
+    ]
+    anomalies = [r for r in series if r.is_anomaly]
+    worst = max(anomalies, key=lambda r: r.excess) if anomalies else None
+
+    return ResourceSummary(
+        label=meta["label"],
+        unit=meta["unit"],
+        total_excess=impact["total_excess_kwh"],
+        savings_kzt=impact["savings_kzt"],
+        co2_saved_kg=impact["co2_saved_kg"] if meta["co2_factor"] is not None else None,
+        baseline=round(get_baseline(flagged, value_column=meta["value_column"]), 2),
+        multiplier=multiplier,
+        tariff_kzt_per_unit=resource_tariff,
+        days_analyzed=int(len(flagged)),
+        anomaly_days=impact["anomaly_days"],
+        baseline_reliable=bool(flagged.attrs["baseline_reliable"]),
+        off_day_samples=int(flagged.attrs["off_day_samples"]),
+        worst_day=worst and worst.date,
+        first_anomaly=anomalies[0].date if anomalies else None,
+        last_anomaly=anomalies[-1].date if anomalies else None,
+        series=series,
+    )
+
+
+def _analyze(
+    df: pd.DataFrame, tariff: float, multiplier: float, *, weather_adjust: bool = False
+) -> AnalyzeResponse:
+    """Run the full pipeline and shape a JSON-friendly response.
+
+    When `weather_adjust` is set, electricity anomalies are computed against
+    a heating-degree-day-adjusted expectation instead of the flat baseline —
+    see core.detect_anomalies_weather_adjusted(). Any failure to fetch
+    weather (no internet, Open-Meteo down, too little data to fit a line)
+    falls back to the flat baseline silently; `weather_adjusted` in the
+    response says which one actually ran.
+    """
+    weather_adjusted = False
+    flagged = None
+    if weather_adjust:
+        try:
+            start = df["date"].min().strftime("%Y-%m-%d")
+            end = df["date"].max().strftime("%Y-%m-%d")
+            temps = weather.fetch_daily_mean_temperatures(start, end)
+            if temps:
+                hdd_by_date = {d: weather.heating_degree_days(t) for d, t in temps.items()}
+                weather_flagged = detect_anomalies_weather_adjusted(
+                    df, hdd_by_date, multiplier=multiplier
+                )
+                if weather_flagged is not None:
+                    flagged = weather_flagged
+                    weather_adjusted = True
+        except Exception:
+            flagged = None
+    if flagged is None:
+        flagged = detect_anomalies(df, multiplier=multiplier)
+
     impact = calculate_impact(flagged, tariff=tariff)
 
     series = [
@@ -118,6 +257,16 @@ def _analyze(df: pd.DataFrame, tariff: float, multiplier: float) -> AnalyzeRespo
     ]
     anomalies = [r for r in series if r.is_anomaly]
     worst = max(anomalies, key=lambda r: r.excess_kwh) if anomalies else None
+
+    resources = {
+        "electricity": _build_resource_summary(
+            df, "electricity", tariff=tariff, multiplier=multiplier, precomputed=flagged
+        )
+    }
+    for key, meta in RESOURCE_META.items():
+        if key == "electricity" or meta["value_column"] not in df.columns:
+            continue
+        resources[key] = _build_resource_summary(df, key, multiplier=multiplier)
 
     return AnalyzeResponse(
         summary=Summary(
@@ -135,6 +284,8 @@ def _analyze(df: pd.DataFrame, tariff: float, multiplier: float) -> AnalyzeRespo
         worst_day=worst and worst.date,
         first_anomaly=anomalies[0].date if anomalies else None,
         last_anomaly=anomalies[-1].date if anomalies else None,
+        weather_adjusted=weather_adjusted,
+        resources=resources,
     )
 
 
@@ -143,6 +294,8 @@ async def analyze(
     file: UploadFile | None = None,
     tariff: float = TARIFF_KZT_PER_KWH,
     multiplier: float = BASELINE_MULTIPLIER,
+    weather_adjust: bool = False,
+    sample: str = "default",
 ):
     if tariff < 0:
         raise HTTPException(422, "Тариф не может быть отрицательным.")
@@ -150,8 +303,8 @@ async def analyze(
         raise HTTPException(422, "Множитель порога аномалии должен быть положительным.")
 
     if file is None or not file.filename:
-        source: bytes | Path = SAMPLE_CSV
-        label = SAMPLE_CSV.name
+        source: bytes | Path = SAMPLE_MULTI_CSV if sample == "multi" else SAMPLE_CSV
+        label = source.name
     else:
         if not file.filename.lower().endswith(ALLOWED_SUFFIXES):
             raise HTTPException(
@@ -162,7 +315,7 @@ async def analyze(
 
     try:
         df = _clean(_to_frame(source, label))
-        result = _analyze(df, tariff, multiplier)
+        result = _analyze(df, tariff, multiplier, weather_adjust=weather_adjust)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except HTTPException:

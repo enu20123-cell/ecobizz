@@ -10,6 +10,7 @@ from core import (
     MIN_OFF_DAY_SAMPLES,
     calculate_impact,
     detect_anomalies,
+    detect_anomalies_weather_adjusted,
     get_baseline,
     load_data,
 )
@@ -116,3 +117,72 @@ def test_load_data_derives_is_workday_from_kz_calendar_when_missing():
 def test_load_data_keeps_manual_is_workday_column(sample_df):
     """A school-supplied schedule always wins over the calendar guess."""
     assert list(sample_df.columns) == ["date", "consumption_kwh", "is_workday"]
+
+
+def test_detect_anomalies_accepts_a_different_resource_column():
+    """value_column lets the same statistic run on water/heat, not just kWh."""
+    off_days = MIN_OFF_DAY_SAMPLES + 2
+    df = pd.DataFrame(
+        {
+            "date": pd.date_range("2026-01-01", periods=off_days + 1),
+            "consumption_kwh": [999.0] * (off_days + 1),  # untouched, must be ignored
+            "water_m3": [10.0] * off_days + [50.0],
+            "is_workday": [0] * off_days + [0],
+        }
+    )
+    flagged = detect_anomalies(df, value_column="water_m3")
+    assert flagged["is_anomaly"].tolist() == [False] * off_days + [True]
+    assert flagged["excess_kwh"].iloc[-1] == pytest.approx(40.0)
+
+
+def _weather_adjusted_fixture():
+    """Non-working days lying exactly on consumption = 100 + 5*HDD (no waste),
+    plus two probe days with the *same* 200 kWh reading but different HDD."""
+    dates = pd.date_range("2026-01-01", periods=10, freq="D")
+    hdds = [0, 2, 4, 6, 8, 10, 12, 14, 1, 13]  # last two are the probe days
+    consumption = [100 + 5 * h for h in hdds[:8]] + [200.0, 200.0]
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "consumption_kwh": consumption,
+            "is_workday": [0] * 10,
+        }
+    )
+    hdd_by_date = {d.strftime("%Y-%m-%d"): h for d, h in zip(dates, hdds)}
+    return df, hdd_by_date
+
+
+def test_weather_adjusted_same_consumption_different_temperature_different_verdict():
+    df, hdd_by_date = _weather_adjusted_fixture()
+    flagged = detect_anomalies_weather_adjusted(df, hdd_by_date)
+    assert flagged is not None
+    mild_day, cold_day = flagged.iloc[8], flagged.iloc[9]
+    assert mild_day["consumption_kwh"] == cold_day["consumption_kwh"] == 200.0
+    # Same absolute spend, but the cold day's extra heating is expected —
+    # only the mild day (little heating justified) should be flagged.
+    assert mild_day["is_anomaly"] and not cold_day["is_anomaly"]
+
+
+def test_weather_adjusted_returns_none_with_too_few_off_days():
+    df = pd.DataFrame(
+        {
+            "date": pd.date_range("2026-01-01", periods=3),
+            "consumption_kwh": [100.0, 110.0, 120.0],
+            "is_workday": [0, 0, 0],
+        }
+    )
+    hdd_by_date = {"2026-01-01": 1.0, "2026-01-02": 2.0, "2026-01-03": 3.0}
+    assert detect_anomalies_weather_adjusted(df, hdd_by_date) is None
+
+
+def test_weather_adjusted_returns_none_without_hdd_variance():
+    off_days = MIN_OFF_DAY_SAMPLES + 1
+    df = pd.DataFrame(
+        {
+            "date": pd.date_range("2026-01-01", periods=off_days),
+            "consumption_kwh": [100.0] * off_days,
+            "is_workday": [0] * off_days,
+        }
+    )
+    hdd_by_date = {d.strftime("%Y-%m-%d"): 5.0 for d in df["date"]}
+    assert detect_anomalies_weather_adjusted(df, hdd_by_date) is None

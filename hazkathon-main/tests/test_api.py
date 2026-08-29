@@ -127,6 +127,56 @@ def test_frontend_is_served(client):
         assert client.get(asset).status_code == 200
 
 
+def test_analyze_single_resource_file_has_only_electricity_in_resources(client):
+    """Backward compatibility: an old-style date+consumption_kwh file still
+    gets the exact same top-level summary/series, and `resources` — a purely
+    additive field — contains only the electricity entry."""
+    res = client.post("/api/analyze")
+    body = res.json()
+    assert res.status_code == 200
+    assert set(body["resources"].keys()) == {"electricity"}
+    assert body["resources"]["electricity"]["total_excess"] == body["summary"]["total_excess_kwh"]
+    assert body["resources"]["electricity"]["anomaly_days"] == body["summary"]["anomaly_days"]
+    assert body["weather_adjusted"] is False
+
+
+def test_analyze_multi_resource_sample_exposes_water_and_heat(client):
+    res = client.post("/api/analyze", params={"sample": "multi"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["source"] == "sample_data_multi.csv"
+    assert set(body["resources"].keys()) == {"electricity", "water", "heat"}
+    water = body["resources"]["water"]
+    assert water["unit"] == "м³"
+    assert water["co2_saved_kg"] is None  # water has no meaningful CO2 factor
+    assert len(water["series"]) == len(body["series"])
+
+
+def test_analyze_multi_resource_file_matches_old_single_resource_response_shape(client, sample_csv_bytes):
+    """A plain old single-resource upload produces an identical response to
+    before this feature existed — multi-resource support never changes the
+    single-resource path."""
+    old = client.post(
+        "/api/analyze", files={"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
+    ).json()
+    again = client.post(
+        "/api/analyze", files={"file": ("data.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
+    ).json()
+    assert old["summary"] == again["summary"]
+    assert old["series"] == again["series"]
+
+
+def test_weather_adjust_flag_never_errors_even_when_unreachable(client, monkeypatch):
+    """Open-Meteo may be unreachable in CI/offline environments — the request
+    must still succeed and fall back to the flat baseline, not 500."""
+    import backend.main as backend_main
+
+    monkeypatch.setattr(backend_main.weather, "fetch_daily_mean_temperatures", lambda *a, **k: None)
+    res = client.post("/api/analyze", params={"weather_adjust": True})
+    assert res.status_code == 200
+    assert res.json()["weather_adjusted"] is False
+
+
 def test_insight_falls_back_offline_without_api_key(client, monkeypatch):
     """No GEMINI_API_KEY in this test environment: the demo must still return
     a usable recommendation instead of a 503, built from the verified numbers."""

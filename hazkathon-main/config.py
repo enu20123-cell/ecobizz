@@ -52,3 +52,31 @@ SCHOOL_TARIFF_TODO = (
     "Confirm the budget organization's actual contracted electricity tariff "
     "before the final demo — none of the tariffs above are a verified school rate."
 )
+
+# ---------------------------------------------------------------------------
+# Water and heat — same "documented, not verified" pattern as the electricity
+# tariff above. These let the multi-resource path in backend/main.py convert
+# excess water/heat into tenge without inventing a number silently; they are
+# clearly flagged as DEMO VALUES so nobody presents them as a real bill.
+# ---------------------------------------------------------------------------
+
+WATER_TARIFF_KZT_PER_M3_DEMO = 141.33
+WATER_TARIFF_TODO = (
+    "DEMO VALUE only, not sourced for a specific city or supplier — confirm the "
+    "actual contracted water tariff before presenting final numbers."
+)
+
+HEAT_TARIFF_KZT_PER_GCAL_DEMO = 6540.0
+HEAT_TARIFF_TODO = (
+    "DEMO VALUE only, not sourced for a specific city or supplier — confirm the "
+    "actual contracted heat tariff before presenting final numbers."
+)
+
+# Heat is usually produced by burning gas or coal, so — unlike water — a CO2
+# factor is physically meaningful for it. Still a demo assumption, same as
+# CO2_KG_PER_KWH above.
+HEAT_CO2_KG_PER_GCAL_DEMO = 200.0
+HEAT_CO2_FACTOR_TODO = (
+    "Confirm the CO2e emissions factor for the heat source (gas/coal boiler, "
+    "district heating mix) before the final demo."
+)

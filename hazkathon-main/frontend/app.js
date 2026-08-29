@@ -66,17 +66,25 @@ function reqTimeout(ms) {
 }
 
 let currentMultiplier = 1.5;
+let lastSampleParam = "default"; // remembers which bundled sample is active, for live re-runs
 
-async function analyze(formData, label) {
+async function analyze(formData, label, extraParams = {}) {
   $("results").classList.add("hidden");
   $("loading-text").textContent = label
     ? `Анализируем «${label}»…`
     : "Анализируем данные по энергопотреблению…";
   setLoading(true);
   try {
-    const tariff = encodeURIComponent($("tariff").value);
-    const multiplier = encodeURIComponent(currentMultiplier);
-    const res = await apiPost(`/api/analyze?tariff=${tariff}&multiplier=${multiplier}`, {
+    const params = new URLSearchParams({
+      tariff: $("tariff").value,
+      multiplier: String(currentMultiplier),
+      // Always requested; the backend falls back to the flat baseline (and
+      // reports weather_adjusted: false) whenever weather data isn't
+      // available, so this is always safe to ask for.
+      weather_adjust: "true",
+      ...extraParams,
+    });
+    const res = await apiPost(`/api/analyze?${params.toString()}`, {
       method: "POST",
       body: formData,
       signal: reqTimeout(30000),
@@ -97,36 +105,138 @@ async function analyze(formData, label) {
 /* ---------- Rendering ---------- */
 let lastAnalysis = null; // reused for the AI Copilot and tariff re-runs
 let lastInsight = null; // last Gemini/offline recommendation, reused by the report download
+let currentResourceKey = "electricity";
+
+const RESOURCE_ORDER = ["electricity", "water", "heat"];
+const RESOURCE_LOSS_LABEL = {
+  electricity: "Потери энергии",
+  water: "Потери воды",
+  heat: "Потери тепла",
+};
 
 function render(data) {
-  const { summary: s, series } = data;
-
   $("source-name").textContent =
-    data.source === "sample_data.csv"
+    data.source === "sample_data.csv" || data.source === "sample_data_multi.csv"
       ? "образец данных за месяц"
       : data.source;
-  $("baseline-chip").textContent = `${fmt(s.baseline_kwh, 1)} кВт·ч`;
-  $("days-analyzed").textContent = `из ${s.days_analyzed} дней проанализировано`;
-  $("multiplier-chip").textContent = fmt(s.multiplier, 1);
-  $("multiplier-value").textContent = fmt(s.multiplier, 1);
-  $("multiplier-slider").value = s.multiplier;
-  currentMultiplier = s.multiplier;
-
-  $("kpi-excess").textContent = fmt(s.total_excess_kwh, 1);
-  $("kpi-kzt").textContent = fmt(s.savings_kzt);
-  $("kpi-co2").textContent = fmt(s.co2_saved_kg, 1);
-  $("kpi-days").textContent = s.anomaly_days;
-  $("kpi-quarterly").textContent = fmt(s.savings_kzt * 3);
-  $("kpi-yearly").textContent = fmt(s.savings_kzt * 12);
-
-  renderInsight(data);
-  renderChart(series, s.baseline_kwh * s.multiplier, s.baseline_kwh);
-  renderTable(series, s);
 
   lastAnalysis = data;
+  renderWeatherBadge(data);
+  buildResourceSwitcher(data);
+  const keys = Object.keys(data.resources || {});
+  renderResourceView(keys.includes("electricity") ? "electricity" : keys[0]);
+
   $("results").classList.remove("hidden");
   resetCopilot();
   showTab("overview");
+}
+
+function renderWeatherBadge(data) {
+  const el = $("weather-badge");
+  if (data.weather_adjusted) {
+    el.className = "weather-badge";
+    el.innerHTML =
+      '<span class="icon">🌡️</span> Учтена погода: часть расхода в мороз — легитимный обогрев, не потеря.';
+  } else {
+    el.className = "weather-badge inactive";
+    el.innerHTML =
+      '<span class="icon">🌡️</span> Погодная поправка недоступна для этого набора данных — используется обычный базовый уровень.';
+  }
+  el.classList.remove("hidden");
+}
+
+function buildResourceSwitcher(data) {
+  const keys = Object.keys(data.resources || {});
+  const wrap = $("resource-switcher");
+  if (keys.length <= 1) {
+    wrap.classList.add("hidden");
+    wrap.innerHTML = "";
+    return;
+  }
+  const ordered = RESOURCE_ORDER.filter((k) => keys.includes(k));
+  wrap.innerHTML = ordered
+    .map(
+      (k, i) =>
+        `<button class="seg-btn${i === 0 ? " active" : ""}" data-resource="${k}" type="button">${data.resources[k].label}</button>`,
+    )
+    .join("");
+  wrap.classList.remove("hidden");
+  wrap.querySelectorAll(".seg-btn").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      wrap.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
+      renderResourceView(btn.dataset.resource);
+    }),
+  );
+}
+
+function setKpiUnit(id, text) {
+  $(id).closest(".kpi").querySelector(".kpi-unit").textContent = text;
+}
+
+function updateTableHeaders(r) {
+  const heads = document.querySelectorAll("#anomaly-table thead th");
+  heads[1].textContent = `Потребление, ${r.unit}`;
+  heads[2].textContent = `Превышение, ${r.unit}`;
+  heads[4].textContent = r.co2_saved_kg != null ? "CO₂" : `${r.unit} эконом.`;
+}
+
+function renderResourceView(key) {
+  const data = lastAnalysis;
+  const r = data && data.resources && data.resources[key];
+  if (!r) return;
+  currentResourceKey = key;
+
+  $("baseline-chip").textContent = `${fmt(r.baseline, 1)} ${r.unit}`;
+  $("days-analyzed").textContent = `из ${r.days_analyzed} дней проанализировано`;
+  $("multiplier-chip").textContent = fmt(r.multiplier, 1);
+  $("multiplier-value").textContent = fmt(r.multiplier, 1);
+  $("multiplier-slider").value = r.multiplier;
+  currentMultiplier = r.multiplier;
+
+  $("kpi-excess").textContent = fmt(r.total_excess, 1);
+  $("kpi-excess").closest(".kpi").querySelector(".kpi-label").textContent =
+    RESOURCE_LOSS_LABEL[key] || "Потери";
+  setKpiUnit("kpi-excess", `${r.unit} сверх базового уровня`);
+
+  $("kpi-kzt").textContent = fmt(r.savings_kzt);
+  $("kpi-days").textContent = r.anomaly_days;
+  $("kpi-quarterly").textContent = fmt(r.savings_kzt * 3);
+  $("kpi-yearly").textContent = fmt(r.savings_kzt * 12);
+
+  const co2Kpi = $("kpi-co2").closest(".kpi");
+  if (r.co2_saved_kg != null) {
+    $("kpi-co2").textContent = fmt(r.co2_saved_kg, 1);
+    co2Kpi.querySelector(".kpi-label").textContent = "Экономия CO₂";
+    co2Kpi.querySelector(".kpi-unit").textContent = "кг выбросов";
+  } else {
+    $("kpi-co2").textContent = fmt(r.total_excess, 1);
+    co2Kpi.querySelector(".kpi-label").textContent = `${r.unit} сэкономлено`;
+    co2Kpi.querySelector(".kpi-unit").textContent = "вместо перерасхода в нерабочие дни";
+  }
+
+  renderInsight({
+    summary: { anomaly_days: r.anomaly_days, savings_kzt: r.savings_kzt },
+    worst_day: r.worst_day,
+    first_anomaly: r.first_anomaly,
+    last_anomaly: r.last_anomaly,
+  });
+
+  const adaptedSeries = r.series.map((d) => ({
+    date: d.date,
+    consumption_kwh: d.value,
+    excess_kwh: d.excess,
+    is_workday: d.is_workday,
+    is_anomaly: d.is_anomaly,
+  }));
+
+  updateTableHeaders(r);
+  renderChart(adaptedSeries, r.baseline * r.multiplier);
+  renderTable(adaptedSeries, {
+    unit: r.unit,
+    tariff_per_unit: r.tariff_kzt_per_unit,
+    co2_per_unit:
+      r.co2_saved_kg != null ? (r.total_excess > 0 ? r.co2_saved_kg / r.total_excess : 0) : null,
+  });
 }
 
 function renderInsight({ summary, worst_day, first_anomaly, last_anomaly }) {
@@ -153,16 +263,21 @@ function renderTable(series, s) {
   const tbody = $("anomaly-table").querySelector("tbody");
   tbody.innerHTML = "";
   $("no-anomalies").classList.toggle("hidden", rows.length > 0);
+  const unit = s.unit || "кВт·ч";
 
   for (const d of [...rows].sort((a, b) => b.excess_kwh - a.excess_kwh)) {
+    const co2Cell =
+      s.co2_per_unit != null
+        ? `${fmt(d.excess_kwh * s.co2_per_unit, 1)} кг`
+        : `${fmt(d.excess_kwh, 1)} ${unit}`;
     tbody.insertAdjacentHTML(
       "beforeend",
       `<tr>
         <td>${d.date}</td>
-        <td class="num">${fmt(d.consumption_kwh, 1)} кВт·ч</td>
-        <td class="num excess">+${fmt(d.excess_kwh, 1)} кВт·ч</td>
-        <td class="num">${fmt(d.excess_kwh * s.tariff_kzt_per_kwh)} тенге</td>
-        <td class="num">${fmt(d.excess_kwh * s.co2_factor, 1)} кг</td>
+        <td class="num">${fmt(d.consumption_kwh, 1)} ${unit}</td>
+        <td class="num excess">+${fmt(d.excess_kwh, 1)} ${unit}</td>
+        <td class="num">${fmt(d.excess_kwh * s.tariff_per_unit)} тенге</td>
+        <td class="num">${co2Cell}</td>
       </tr>`,
     );
   }
@@ -599,11 +714,36 @@ function drawChart() {
   attachInteraction(svgEl, { n, slot, xCenter, y }, describe);
 }
 /* ---------- AI Copilot ---------- */
+
+// Shows the exact figures the /api/insight prompt is built from — direct
+// answer to "what data does the AI actually receive", visible before the
+// recommendation text itself, not buried in the README.
+function renderAiDataBlock() {
+  if (!lastAnalysis) return;
+  const s = lastAnalysis.summary;
+  const dates = lastAnalysis.series
+    .filter((d) => d.is_anomaly)
+    .slice(0, 5)
+    .map((d) => d.date)
+    .join(", ");
+  $("ai-data-block").innerHTML =
+    `<strong>Данные, переданные ИИ:</strong>` +
+    `<ul>` +
+    `<li>Источник: ${lastAnalysis.source} · дней проанализировано: ${s.days_analyzed}</li>` +
+    `<li>Аномальных дней: ${s.anomaly_days} · перерасход: ${fmt(s.total_excess_kwh, 1)} кВт·ч</li>` +
+    `<li>Потери: ${fmt(s.savings_kzt)} тенге · CO₂: ${fmt(s.co2_saved_kg, 1)} кг</li>` +
+    `<li>Погодная поправка учтена: ${lastAnalysis.weather_adjusted ? "да" : "нет"}</li>` +
+    (dates ? `<li>Отмеченные даты (топ-5): ${dates}</li>` : "") +
+    `</ul>`;
+  $("ai-data-block").classList.remove("hidden");
+}
+
 function resetCopilot() {
   $("insight-text").classList.add("hidden");
   $("insight-text").innerHTML = "";
   $("insight-loading").classList.add("hidden");
   lastInsight = null;
+  renderAiDataBlock();
 }
 
 // Minimal safe Markdown renderer (headings, bullets, bold, code) — input is
@@ -696,14 +836,28 @@ $("file-input").addEventListener("change", (e) => {
   e.target.value = "";
 });
 
-$("sample-btn").addEventListener("click", () => analyze(new FormData()));
+$("sample-btn").addEventListener("click", () => {
+  lastSampleParam = "default";
+  analyze(new FormData());
+});
+
+$("sample-multi-btn").addEventListener("click", () => {
+  lastSampleParam = "multi";
+  analyze(new FormData(), null, { sample: "multi" });
+});
+
+function isBundledSample(source) {
+  return source === "sample_data.csv" || source === "sample_data_multi.csv";
+}
 
 let debounceTimer;
 $("tariff").addEventListener("input", () => {
   if ($("results").classList.contains("hidden")) return;
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
-    if (lastAnalysis && lastAnalysis.source === "sample_data.csv") analyze(new FormData());
+    if (lastAnalysis && isBundledSample(lastAnalysis.source)) {
+      analyze(new FormData(), null, { sample: lastSampleParam });
+    }
     // For uploads we keep the previous result until a new file is chosen,
     // because browsers cannot re-read a File input after it is cleared.
   }, 450);
@@ -737,7 +891,9 @@ $("multiplier-slider").addEventListener("input", () => {
     currentMultiplier = value;
     // Same limitation as the tariff input: an uploaded File input can't be
     // re-read once cleared, so only the bundled sample recalculates live.
-    if (lastAnalysis && lastAnalysis.source === "sample_data.csv") analyze(new FormData());
+    if (lastAnalysis && isBundledSample(lastAnalysis.source)) {
+      analyze(new FormData(), null, { sample: lastSampleParam });
+    }
   }, 300);
 });
 
