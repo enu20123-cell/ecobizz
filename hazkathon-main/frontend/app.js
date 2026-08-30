@@ -116,6 +116,11 @@ const RESOURCE_LOSS_LABEL = {
   water: "Потери воды",
   heat: "Потери тепла",
 };
+const RESOURCE_ICON = {
+  electricity: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 11-14h-7l0-6Z"/></svg>',
+  water: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8 8 5 11.5 5 15a7 7 0 0 0 14 0c0-3.5-3-7-7-13Z"/></svg>',
+  heat: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-1 3-4 4-4 8a4 4 0 0 0 8 0c0-1-.5-2-1-2 .3 2-.7 3-1.5 3-1.2 0-2-1-1.5-2.5C13 7 12.5 4.5 12 2Zm-3 14a3 3 0 0 0 6 0c0-1.2-.7-2-1.5-2.6.2 1.3-.5 2.1-1.5 2.1s-1.7-.8-1.5-2.1c-.8.6-1.5 1.4-1.5 2.6Z"/></svg>',
+};
 
 function render(data) {
   $("source-name").textContent =
@@ -126,6 +131,7 @@ function render(data) {
   lastAnalysis = data;
   renderWeatherBadge(data);
   renderCauseSummary(data);
+  renderForecast(data);
   buildResourceSwitcher(data);
   const keys = Object.keys(data.resources || {});
   renderResourceView(keys.includes("electricity") ? "electricity" : keys[0]);
@@ -155,6 +161,46 @@ function renderCauseSummary(data) {
   box.classList.remove("hidden");
 }
 
+// Reuses the exact same savings_kzt × 3 / × 12 projection already shown on
+// the Overview KPIs — this tab just gives it more room, not a new model.
+function renderForecast(data) {
+  const s = data.summary;
+  const base = s.savings_kzt;
+
+  const cards = [
+    { label: "Текущий период", cls: "green", value: base, note: `${s.days_analyzed} дн. проанализировано` },
+    { label: "Прогноз за 3 месяца", cls: "teal", value: base * 3, note: "проекция, не гарантированный результат" },
+    { label: "Прогноз за год", cls: "purple", value: base * 12, note: "проекция, не гарантированный результат" },
+  ];
+  $("forecast-kpis").innerHTML = cards
+    .map(
+      (c) =>
+        `<article class="kpi ${c.cls}">` +
+        `<span class="kpi-label">${c.label}</span>` +
+        `<span class="kpi-value">${fmt(c.value)}</span>` +
+        `<span class="kpi-unit">тенге</span>` +
+        `<span class="kpi-note">${c.note}</span>` +
+        `</article>`,
+    )
+    .join("");
+
+  const months = Array.from({ length: 12 }, (_, i) => base * (i + 1));
+  const max = months[months.length - 1] || 1;
+  $("forecast-bars").innerHTML = months
+    .map((v, i) => {
+      const h = Math.max(4, (v / max) * 100);
+      const milestone = i === 2 || i === 11;
+      return (
+        `<div class="fbar-col${milestone ? " milestone" : ""}">` +
+        `<span class="fbar-val">${milestone ? fmt(v) : ""}</span>` +
+        `<div class="fbar" style="height:${h}%"></div>` +
+        `<span class="fbar-label">${i + 1}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+}
+
 function renderWeatherBadge(data) {
   const el = $("weather-badge");
   if (data.weather_adjusted) {
@@ -181,7 +227,7 @@ function buildResourceSwitcher(data) {
   wrap.innerHTML = ordered
     .map(
       (k, i) =>
-        `<button class="seg-btn${i === 0 ? " active" : ""}" data-resource="${k}" type="button">${data.resources[k].label}</button>`,
+        `<button class="seg-btn${i === 0 ? " active" : ""}" data-resource="${k}" type="button">${RESOURCE_ICON[k] || ""}${data.resources[k].label}</button>`,
     )
     .join("");
   wrap.classList.remove("hidden");
@@ -329,14 +375,14 @@ const MARGIN = { top: 24, right: 22, bottom: 46, left: 64 };
 // Mirrors the CSS custom properties in styles.css (:root) — kept as literal
 // hex here because inline SVG presentation attributes don't reliably resolve
 // var() across browsers, so this is the one place the palette is duplicated.
-const COLORS = { workday: "#2166a5", offday: "#8b95a1", anomaly: "#b3362b" };
+const COLORS = { workday: "#5ec8ff", offday: "#5b6a60", anomaly: "#ff6b6b" };
 const INK = {
-  text: "#121820",
-  muted: "#5b6673",
-  grid: "#e7ebef",
-  amber: "#9c6b12",
-  surface: "#ffffff",
-  border: "#c7cfd8",
+  text: "#eef6f0",
+  muted: "#93a89a",
+  grid: "#263029",
+  amber: "#ffc24b",
+  surface: "#121a15",
+  border: "#37453c",
 };
 const MIN_SPAN = 4;
 
@@ -453,7 +499,7 @@ function drawBarsSvg(items, y) {
     const cx = xCenter(i);
     const yTop = y.yScale(d.kwh);
     const kind = d.excess > 0 ? "anomaly" : d.closed ? "offday" : "workday";
-    svg += `<rect class="bar" style="animation-delay:${Math.min(i * 14, 600)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${(MARGIN.top + y.innerH - yTop).toFixed(1)}" rx="4" fill="url(#g-${kind})"${d.excess > 0 ? ` stroke="${INK.surface}" stroke-width="1"` : ""}/>`;
+    svg += `<rect class="bar" style="animation-delay:${Math.min(i * 14, 600)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${(MARGIN.top + y.innerH - yTop).toFixed(1)}" rx="4" fill="url(#g-${kind})"${d.excess > 0 ? ' stroke="#ffb0b0" stroke-width="1"' : ""}/>`;
     if ((chartState.anim || d.excess > 0) && (n <= 21 || d.excess > 0 || i % step === 0)) {
       svg += `<text x="${cx.toFixed(1)}" y="${(yTop - 5).toFixed(1)}" fill="${d.excess > 0 ? COLORS.anomaly : INK.muted}" font-size="${d.excess > 0 ? 11 : 9.5}" font-weight="${d.excess > 0 ? 700 : 400}" text-anchor="middle">${d.excess > 0 ? "+" + fmt(d.excess) : fmt(d.kwh)}</text>`;
     }
@@ -471,7 +517,7 @@ function drawLineSvg(items, y) {
     `<path class="fade-in" d="M${pts[0]} L${pts.join(" L")} L${xCenter(n - 1).toFixed(1)},${(MARGIN.top + y.innerH).toFixed(1)} L${MARGIN.left},${(MARGIN.top + y.innerH).toFixed(1)} Z" fill="url(#g-area)"/>` +
     `<polyline points="${pts.join(" ")}" fill="none" stroke="${COLORS.workday}" stroke-width="2.5" stroke-linejoin="round"/>`;
   items.forEach((d, i) => {
-    svg += `<circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.kwh).toFixed(1)}" r="${d.excess > 0 ? 4.5 : 2.6}" fill="${d.color}"${d.excess > 0 ? ` stroke="${INK.surface}" stroke-width="1.2"` : ""}/>`;
+    svg += `<circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.kwh).toFixed(1)}" r="${d.excess > 0 ? 4.5 : 2.6}" fill="${d.color}"${d.excess > 0 ? ' stroke="#ffffff" stroke-width="1.2"' : ""}/>`;
   });
   svg += xLabelsFor(items, xCenter, items.map((d) => shortDate(d.label)));
   return { svg, xCenter };
@@ -528,11 +574,9 @@ function attachInteraction(svgEl, geom, describe) {
 
   const vLine = mk("line"); set(vLine, { stroke: INK.muted, "stroke-dasharray": "3 3", opacity: 0 });
   const hLine = mk("line"); set(hLine, { stroke: INK.muted, "stroke-dasharray": "3 3", opacity: 0 });
-  const selRect = mk("rect"); set(selRect, { fill: "rgba(33,102,165,.12)", stroke: COLORS.workday, "stroke-dasharray": "4 3", opacity: 0 });
+  const selRect = mk("rect"); set(selRect, { fill: "rgba(94,200,255,.12)", stroke: COLORS.workday, "stroke-dasharray": "4 3", opacity: 0 });
   const yG = mk("g"), yR = mk("rect"), yT = mk("text");
-  // Inverted (dark pill, light text) on purpose — a small transient tooltip
-  // popping against the light chart, not a section of the page theme.
-  set(yR, { fill: INK.text, stroke: INK.text, rx: 3 }); set(yT, { fill: "#ffffff", "font-size": "10.5", "text-anchor": "middle" });
+  set(yR, { fill: INK.surface, stroke: INK.border, rx: 3 }); set(yT, { fill: INK.text, "font-size": "10.5", "text-anchor": "middle" });
   yG.append(yR, yT); set(yG, { opacity: 0 });
   svgEl.append(selRect, vLine, hLine, yG);
 
@@ -1023,9 +1067,10 @@ async function loadTelegramLink() {
     const res = await apiGet("/api/config");
     const data = await res.json();
     if (data.telegram_bot_username) {
-      const link = $("telegram-link");
-      link.href = `https://t.me/${data.telegram_bot_username}`;
-      link.classList.remove("hidden");
+      document.querySelectorAll(".js-telegram-link").forEach((link) => {
+        link.href = `https://t.me/${data.telegram_bot_username}`;
+        link.classList.remove("hidden");
+      });
     }
   } catch {
     // No backend reachable yet, or bot not configured — link just stays hidden.
