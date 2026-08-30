@@ -95,6 +95,16 @@ body {
   color: #06130c;
 }
 .btn.primary:hover { background: #4cc48e; }
+.btn.telegram {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #229ed9;
+  border-color: #229ed9;
+  color: #fff;
+  text-decoration: none;
+}
+.btn.telegram:hover { background: #1b8bc4; }
 
 /* ---------- Layout ---------- */
 main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
@@ -187,6 +197,70 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
 
 .highlights { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
 .highlights li::marker { color: var(--accent); }
+
+/* ---------- Cause-summary ranking (Overview) ---------- */
+.cause-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.cause-row:last-child { border-bottom: none; }
+.cause-row .cause-name { color: var(--text); }
+.cause-row .cause-days { color: var(--muted); font-variant-numeric: tabular-nums; }
+.cause-row .cause-bar-wrap {
+  width: 120px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.cause-row .cause-bar { height: 100%; background: var(--accent); border-radius: 4px; }
+
+/* ---------- Pattern / cause chips in the data table ---------- */
+.pattern-chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pattern-chip.persistent { background: rgba(248, 81, 73, 0.15); color: #ff9f9a; }
+.pattern-chip.periodic { background: rgba(210, 153, 34, 0.18); color: #f0b93d; }
+.pattern-chip.oneoff { background: rgba(88, 166, 255, 0.15); color: #8ec3ff; }
+.reason-cell { max-width: 260px; white-space: normal; font-size: 12.5px; color: var(--muted); }
+.reason-cell .confidence { color: var(--text); font-weight: 600; }
+
+/* ---------- Provenance table (About method) ---------- */
+.provenance-table { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.prov-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.prov-row:last-child { border-bottom: none; }
+.prov-row .prov-key { color: var(--text); font-weight: 600; }
+.prov-row .prov-note { grid-column: 1 / -1; color: var(--muted); font-size: 12px; margin-top: -4px; }
+.prov-row .prov-value { font-variant-numeric: tabular-nums; color: var(--text); }
+.prov-kind {
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.prov-kind.source { background: rgba(63, 178, 127, 0.18); color: var(--accent); }
+.prov-kind.derived { background: rgba(88, 166, 255, 0.15); color: var(--blue); }
+.prov-kind.estimate { background: rgba(210, 153, 34, 0.18); color: var(--amber); }
 
 .insight {
   border: 1px solid rgba(63, 178, 127, 0.35);

@@ -38,6 +38,9 @@ class ResourceRecord(BaseModel):
     is_workday: bool
     is_anomaly: bool
     excess: float
+    # "устойчивая"/"периодическая"/"разовая" — see core.classify_anomaly_shapes().
+    # None on non-anomalous days.
+    pattern: str | None = None
 
 
 class ResourceSummary(BaseModel):
@@ -64,6 +67,25 @@ class ResourceSummary(BaseModel):
     series: list[ResourceRecord] = Field(default_factory=list)
 
 
+class CauseDiagnosis(BaseModel):
+    """Cross-resource cause hypothesis for one anomalous day — see
+    core.diagnose_anomaly_day(). A plain rule table, not ML."""
+
+    hypothesis: str
+    confirming_signals: int = Field(ge=0)
+    available_signals: int = Field(ge=0)
+    confidence_label: str  # "высокая" | "средняя" | "низкая"
+
+
+class CauseSummaryEntry(BaseModel):
+    """Aggregate count of one hypothesis across all anomalous days in the
+    period — e.g. "HVAC suspected on 5 of 7 anomalous days"."""
+
+    hypothesis: str
+    days: int = Field(ge=1)
+    share_pct: float = Field(ge=0, le=100)
+
+
 class AnalyzeResponse(BaseModel):
     summary: Summary
     series: list[DayRecord]
@@ -78,6 +100,10 @@ class AnalyzeResponse(BaseModel):
     # Keyed by resource name ("electricity", "water", "heat"); only resources
     # actually present in the uploaded file are included.
     resources: dict[str, ResourceSummary] = Field(default_factory=dict)
+    # Keyed by ISO date, only for days with at least one anomalous resource.
+    cause_diagnosis: dict[str, CauseDiagnosis] = Field(default_factory=dict)
+    # Ranked by day count, descending — the period-level "what's usually behind this" view.
+    cause_summary: list[CauseSummaryEntry] = Field(default_factory=list)
 
 
 class InsightRequest(BaseModel):
@@ -91,3 +117,20 @@ class InsightRequest(BaseModel):
 class InsightResponse(BaseModel):
     insight: str
     model: str
+
+
+class ProvenanceEntry(BaseModel):
+    """One config.PROVENANCE row, for the "About method" screen — see
+    config.py and scripts/check_config.py."""
+
+    key: str
+    value: float | None
+    kind: str  # "source" | "derived" | "estimate"
+    note: str
+
+
+class ConfigResponse(BaseModel):
+    """Public, non-secret runtime config the frontend needs — never the token
+    itself, only the bot's public @username so the UI can link to it."""
+
+    telegram_bot_username: str = ""

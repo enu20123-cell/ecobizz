@@ -9,8 +9,10 @@ from core import (
     BASELINE_MULTIPLIER,
     MIN_OFF_DAY_SAMPLES,
     calculate_impact,
+    classify_anomaly_shapes,
     detect_anomalies,
     detect_anomalies_weather_adjusted,
+    diagnose_anomaly_day,
     get_baseline,
     load_data,
 )
@@ -186,3 +188,72 @@ def test_weather_adjusted_returns_none_without_hdd_variance():
     )
     hdd_by_date = {d.strftime("%Y-%m-%d"): 5.0 for d in df["date"]}
     assert detect_anomalies_weather_adjusted(df, hdd_by_date) is None
+
+
+def test_diagnose_anomaly_day_none_when_nothing_anomalous():
+    assert diagnose_anomaly_day({"electricity": False, "water": False}) is None
+
+
+def test_diagnose_anomaly_day_hvac_when_electricity_and_heat_both_anomalous():
+    result = diagnose_anomaly_day({"electricity": True, "water": False, "heat": True})
+    assert "HVAC" in result["hypothesis"]
+    assert result["confirming_signals"] == 2
+    assert result["available_signals"] == 3
+
+
+def test_diagnose_anomaly_day_lighting_when_only_electricity_anomalous():
+    result = diagnose_anomaly_day({"electricity": True, "heat": False})
+    assert "Освещение" in result["hypothesis"]
+
+
+def test_diagnose_anomaly_day_leak_when_only_water_anomalous():
+    result = diagnose_anomaly_day({"electricity": False, "water": True})
+    assert "Утечка" in result["hypothesis"]
+
+
+def test_diagnose_anomaly_day_weather_adjusted_adds_a_confirming_signal():
+    without = diagnose_anomaly_day({"electricity": True, "heat": True}, weather_adjusted=False)
+    with_weather = diagnose_anomaly_day({"electricity": True, "heat": True}, weather_adjusted=True)
+    assert with_weather["confirming_signals"] > without["confirming_signals"]
+    assert with_weather["available_signals"] > without["available_signals"]
+
+
+def test_diagnose_anomaly_day_confidence_labels_are_a_checkable_ratio():
+    # 1 of 1 available signal confirms -> high confidence, not an invented number.
+    result = diagnose_anomaly_day({"water": True})
+    assert result["confirming_signals"] == 1
+    assert result["available_signals"] == 1
+    assert result["confidence_label"] == "высокая"
+
+
+def _shape_fixture(flag_pattern: list[bool]) -> pd.DataFrame:
+    dates = pd.date_range("2026-01-05", periods=len(flag_pattern), freq="D")  # starts on a Monday
+    return pd.DataFrame({"date": dates, "is_anomaly": flag_pattern})
+
+
+def test_classify_anomaly_shapes_persistent_run():
+    # 3+ consecutive anomalous days -> "устойчивая" for every day in the run.
+    flags = [False, True, True, True, False]
+    shapes = classify_anomaly_shapes(_shape_fixture(flags))
+    dates = pd.date_range("2026-01-05", periods=len(flags), freq="D")
+    for i in (1, 2, 3):
+        assert shapes[dates[i].strftime("%Y-%m-%d")] == "устойчивая"
+    assert dates[0].strftime("%Y-%m-%d") not in shapes
+    assert dates[4].strftime("%Y-%m-%d") not in shapes
+
+
+def test_classify_anomaly_shapes_periodic_same_weekday():
+    # Two isolated Mondays anomalous, nothing else -> "периодическая" for both.
+    dates = pd.date_range("2026-01-05", periods=15, freq="D")  # 2026-01-05 and -12 are Mondays
+    flags = [d.strftime("%Y-%m-%d") in ("2026-01-05", "2026-01-12") for d in dates]
+    shapes = classify_anomaly_shapes(pd.DataFrame({"date": dates, "is_anomaly": flags}))
+    assert shapes["2026-01-05"] == "периодическая"
+    assert shapes["2026-01-12"] == "периодическая"
+
+
+def test_classify_anomaly_shapes_one_off():
+    # A single isolated anomalous day with no repeat weekday elsewhere -> "разовая".
+    dates = pd.date_range("2026-01-05", periods=5, freq="D")
+    flags = [False, False, True, False, False]
+    shapes = classify_anomaly_shapes(pd.DataFrame({"date": dates, "is_anomaly": flags}))
+    assert shapes[dates[2].strftime("%Y-%m-%d")] == "разовая"

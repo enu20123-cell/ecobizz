@@ -5,6 +5,10 @@ using its own defaults (so existing tests keep passing), but every default here 
 traceable to a real source instead of an "eyeballed" number.
 """
 
+from dataclasses import dataclass
+
+from core import BASELINE_MULTIPLIER
+
 # Real household tariff for the Abai region (bytovoy/household tariff), cited in
 # the project brief. This is the default used by core.py. It is NOT verified for
 # any specific school or business — confirm the actual contracted tariff for the
@@ -80,3 +84,70 @@ HEAT_CO2_FACTOR_TODO = (
     "Confirm the CO2e emissions factor for the heat source (gas/coal boiler, "
     "district heating mix) before the final demo."
 )
+
+# ---------------------------------------------------------------------------
+# Provenance registry — every numeric constant the app uses, tagged with
+# where it came from, structured (not just a code comment) so it can be
+# rendered programmatically on the "About method" screen and scanned by
+# scripts/check_config.py. `kind` is one of:
+#   "source"  — traceable to a real, cited document/page
+#   "derived" — computed from a source value, not itself independently sourced
+#   "estimate"— an engineering placeholder with no confirmed source yet
+# A number with no honest source stays an "estimate" here rather than being
+# dressed up as a "source" — that distinction is the whole point of this file.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Provenance:
+    value: float | None
+    kind: str  # "source" | "derived" | "estimate"
+    note: str
+
+
+PROVENANCE: dict[str, Provenance] = {
+    "tariff_electricity_kzt_per_kwh": Provenance(
+        ABAI_HOUSEHOLD_TARIFF_KZT_PER_KWH,
+        "source",
+        "Бытовой тариф Абайской области из брифа хакатона — не подтверждён для "
+        "конкретной школы/бизнеса.",
+    ),
+    "co2_factor_kg_per_kwh": Provenance(
+        DEFAULT_CO2_KG_PER_KWH,
+        "estimate",
+        "Демонстрационное допущение, не подтверждённый коэффициент сети РК.",
+    ),
+    "anomaly_multiplier": Provenance(
+        BASELINE_MULTIPLIER,
+        "estimate",
+        "Инженерная оценка порога для MVP — не откалибрована по длинной реальной истории.",
+    ),
+    "water_tariff_kzt_per_m3": Provenance(
+        WATER_TARIFF_KZT_PER_M3_DEMO,
+        "estimate",
+        "Демо-значение, не привязано к конкретному поставщику воды.",
+    ),
+    "heat_tariff_kzt_per_gcal": Provenance(
+        HEAT_TARIFF_KZT_PER_GCAL_DEMO,
+        "estimate",
+        "Демо-значение, не привязано к конкретному поставщику тепла.",
+    ),
+    "heat_co2_factor_kg_per_gcal": Provenance(
+        HEAT_CO2_KG_PER_GCAL_DEMO,
+        "estimate",
+        "Инженерная оценка для типового газового/угольного котла.",
+    ),
+    # Postanovleniye Pravitel'stva RK No. 1118 sets official per-region,
+    # per-floor-count consumption norms for budget organizations — real,
+    # findable document, but we do not have the specific figure for a given
+    # region/floor-count on hand. Left as None rather than guessing a number;
+    # fill in the real value (with its own source note) once confirmed.
+    "official_norm_kwh_per_day": Provenance(
+        None,
+        "estimate",
+        "TODO: не заполнено. Постановление Правительства РК №1118 задаёт официальные "
+        "нормативы потребления для бюджетных организаций по регионам и этажности — "
+        "нужна конкретная цифра для анализируемого здания, прежде чем сравнение "
+        "'факт vs норматив' появится в отчёте.",
+    ),
+}

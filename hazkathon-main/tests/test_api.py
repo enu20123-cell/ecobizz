@@ -177,6 +177,57 @@ def test_weather_adjust_flag_never_errors_even_when_unreachable(client, monkeypa
     assert res.json()["weather_adjusted"] is False
 
 
+def test_analyze_sample_includes_cause_diagnosis_for_anomalous_days(client):
+    body = client.post("/api/analyze").json()
+    assert body["summary"]["anomaly_days"] == 7
+    assert len(body["cause_diagnosis"]) == 7
+    for entry in body["cause_diagnosis"].values():
+        assert entry["confidence_label"] in ("высокая", "средняя", "низкая")
+        assert entry["confirming_signals"] <= entry["available_signals"]
+    assert body["cause_summary"]
+    assert sum(e["days"] for e in body["cause_summary"]) == 7
+
+
+def test_analyze_multi_resource_cause_diagnosis_uses_all_resources(client):
+    body = client.post("/api/analyze", params={"sample": "multi"}).json()
+    for date, entry in body["cause_diagnosis"].items():
+        assert entry["available_signals"] >= 1
+        # every diagnosed day comes from at least one resource actually anomalous that day
+        assert any(
+            r["series"][[d["date"] for d in r["series"]].index(date)]["is_anomaly"]
+            for r in body["resources"].values()
+        )
+
+
+def test_analyze_resources_series_includes_anomaly_pattern(client):
+    body = client.post("/api/analyze").json()
+    anomalous = [d for d in body["resources"]["electricity"]["series"] if d["is_anomaly"]]
+    assert anomalous
+    for day in anomalous:
+        assert day["pattern"] in ("устойчивая", "периодическая", "разовая")
+    normal = [d for d in body["resources"]["electricity"]["series"] if not d["is_anomaly"]]
+    assert all(day["pattern"] is None for day in normal)
+
+
+def test_provenance_endpoint_lists_tagged_constants(client):
+    res = client.get("/api/provenance")
+    assert res.status_code == 200
+    entries = res.json()
+    assert entries
+    for entry in entries:
+        assert entry["kind"] in ("source", "derived", "estimate")
+        assert entry["note"]
+
+
+def test_config_endpoint_exposes_bot_username_not_token(client, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "ecobizzbot")
+    res = client.get("/api/config")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["telegram_bot_username"] == "ecobizzbot"
+    assert "token" not in str(body).lower()
+
+
 def test_insight_falls_back_offline_without_api_key(client, monkeypatch):
     """No GEMINI_API_KEY in this test environment: the demo must still return
     a usable recommendation instead of a 503, built from the verified numbers."""

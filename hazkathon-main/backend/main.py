@@ -26,15 +26,21 @@ from core import (
     DEFAULT_CALENDAR_PATH,
     TARIFF_KZT_PER_KWH,
     calculate_impact,
+    classify_anomaly_shapes,
     detect_anomalies,
     detect_anomalies_weather_adjusted,
+    diagnose_anomaly_day,
     get_baseline,
 )
 from backend.schemas import (
     AnalyzeResponse,
+    CauseDiagnosis,
+    CauseSummaryEntry,
+    ConfigResponse,
     DayRecord,
     InsightRequest,
     InsightResponse,
+    ProvenanceEntry,
     ResourceRecord,
     ResourceSummary,
     Summary,
@@ -177,6 +183,7 @@ def _build_resource_summary(
     impact = calculate_impact(
         flagged, tariff=resource_tariff, co2_kg_per_kwh=meta["co2_factor"] or 0.0
     )
+    shapes = classify_anomaly_shapes(flagged)
 
     series = [
         ResourceRecord(
@@ -185,6 +192,7 @@ def _build_resource_summary(
             is_workday=bool(row.is_workday),
             is_anomaly=bool(row.is_anomaly),
             excess=round(float(row.excess_kwh), 2),
+            pattern=shapes.get(row.date.strftime("%Y-%m-%d")),
         )
         for row in flagged.itertuples(index=False)
     ]
@@ -209,6 +217,38 @@ def _build_resource_summary(
         last_anomaly=anomalies[-1].date if anomalies else None,
         series=series,
     )
+
+
+def _build_cause_diagnosis(
+    resources: dict[str, ResourceSummary], weather_adjusted: bool
+) -> tuple[dict, list]:
+    """Merge every resource's per-day is_anomaly flags by date and run
+    core.diagnose_anomaly_day() on each day with at least one anomaly, then
+    roll the results up into a period-level ranking (cause_summary)."""
+    flags_by_date: dict = {}
+    for key, resource in resources.items():
+        for record in resource.series:
+            flags_by_date.setdefault(record.date, {})[key] = record.is_anomaly
+
+    diagnosis: dict[str, CauseDiagnosis] = {}
+    hypothesis_counts: dict[str, int] = {}
+    for date, flags in flags_by_date.items():
+        result = diagnose_anomaly_day(flags, weather_adjusted=weather_adjusted)
+        if result is None:
+            continue
+        diagnosis[date] = CauseDiagnosis(**result)
+        hypothesis_counts[result["hypothesis"]] = hypothesis_counts.get(result["hypothesis"], 0) + 1
+
+    total = len(diagnosis)
+    summary = (
+        [
+            CauseSummaryEntry(hypothesis=h, days=n, share_pct=round(n / total * 100, 1))
+            for h, n in sorted(hypothesis_counts.items(), key=lambda kv: kv[1], reverse=True)
+        ]
+        if total
+        else []
+    )
+    return diagnosis, summary
 
 
 def _analyze(
@@ -268,6 +308,8 @@ def _analyze(
             continue
         resources[key] = _build_resource_summary(df, key, multiplier=multiplier)
 
+    cause_diagnosis, cause_summary = _build_cause_diagnosis(resources, weather_adjusted)
+
     return AnalyzeResponse(
         summary=Summary(
             **impact,
@@ -286,6 +328,8 @@ def _analyze(
         last_anomaly=anomalies[-1].date if anomalies else None,
         weather_adjusted=weather_adjusted,
         resources=resources,
+        cause_diagnosis=cause_diagnosis,
+        cause_summary=cause_summary,
     )
 
 
@@ -452,6 +496,24 @@ async def insight(req: InsightRequest):
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/provenance", response_model=list[ProvenanceEntry])
+async def provenance():
+    """Every numeric constant the app uses, tagged with where it came from —
+    powers the "About method" screen's sourcing table. See config.PROVENANCE
+    and scripts/check_config.py."""
+    return [
+        ProvenanceEntry(key=key, value=prov.value, kind=prov.kind, note=prov.note)
+        for key, prov in config.PROVENANCE.items()
+    ]
+
+
+@app.get("/api/config", response_model=ConfigResponse)
+async def public_config():
+    """Non-secret runtime config the frontend needs — never the bot token
+    itself, only its public @username so the UI can link to the Telegram bot."""
+    return ConfigResponse(telegram_bot_username=os.environ.get("TELEGRAM_BOT_USERNAME", "").strip())
 
 
 class NoCacheStaticFiles(StaticFiles):

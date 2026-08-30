@@ -29,6 +29,9 @@
         Загрузить CSV / Excel
         <input id="file-input" type="file" accept=".csv,.xlsx,.xls" hidden />
       </button>
+      <a id="telegram-link" class="btn telegram hidden" href="#" target="_blank" rel="noopener noreferrer">
+        💬 Открыть бота в Telegram
+      </a>
     </div>
   </header>
 
@@ -61,6 +64,12 @@
         <div id="resource-switcher" class="seg resource-switcher hidden" role="tablist" aria-label="Ресурс"></div>
 
         <section id="insight" class="insight hidden"></section>
+
+        <section id="cause-summary" class="card hidden">
+          <div class="card-head"><h2>Вероятные причины потерь</h2></div>
+          <div id="cause-summary-body"></div>
+          <p class="muted">Простая перекрёстная логика по ресурсам (не ML) — см. вкладку «О методе».</p>
+        </section>
 
         <section class="kpis">
           <article class="kpi red">
@@ -154,6 +163,8 @@
                   <th class="num">Превышение</th>
                   <th class="num">Потери</th>
                   <th class="num">CO₂</th>
+                  <th>Паттерн</th>
+                  <th>Вероятная причина</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -207,6 +218,25 @@
             <p class="muted">Подвиньте ползунок, чтобы пересчитать график и карточки с другим порогом
               чувствительности - без изменения самого метода детекции.</p>
           </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Диагностика причины (по дню)</h2></div>
+          <div class="method-text">
+            <p class="muted">Если в один день аномальны сразу электричество и тепло — вероятная причина
+              HVAC (отопление/вентиляция). Если только электричество, а тепло в норме — вероятно освещение
+              или розеточная нагрузка. Если аномальна только вода без аномалии в электричестве — вероятна
+              утечка, не связанная с занятостью здания. Простая таблица правил на пересечении булевых
+              флагов <code>is_anomaly</code> по каждому ресурсу — не ML, обычная логика if/else.</p>
+            <p class="muted">Оценка уверенности — явное число: «N из M доступных сигналов подтверждают
+              эту причину», где сигналы — это аномальные ресурсы в этот день плюс (для электричества)
+              прохождение погодной поправки, если она применялась.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Источники цифр</h2></div>
+          <div id="provenance-table" class="provenance-table"></div>
         </section>
       </section>
     </section>

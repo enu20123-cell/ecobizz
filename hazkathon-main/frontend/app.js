@@ -28,6 +28,9 @@ async function apiPost(path, opts = {}) {
   }
 }
 
+// Same origin-fallback logic as apiPost, for plain GET reads (config, provenance).
+const apiGet = (path) => apiPost(path, { method: "GET" });
+
 const fmt = (n, digits = 0) =>
   Number(n).toLocaleString("en-US", {
     minimumFractionDigits: digits,
@@ -122,6 +125,7 @@ function render(data) {
 
   lastAnalysis = data;
   renderWeatherBadge(data);
+  renderCauseSummary(data);
   buildResourceSwitcher(data);
   const keys = Object.keys(data.resources || {});
   renderResourceView(keys.includes("electricity") ? "electricity" : keys[0]);
@@ -129,6 +133,26 @@ function render(data) {
   $("results").classList.remove("hidden");
   resetCopilot();
   showTab("overview");
+}
+
+function renderCauseSummary(data) {
+  const box = $("cause-summary");
+  const entries = data.cause_summary || [];
+  if (!entries.length) {
+    box.classList.add("hidden");
+    return;
+  }
+  $("cause-summary-body").innerHTML = entries
+    .map(
+      (e) =>
+        `<div class="cause-row">` +
+        `<span class="cause-name">${e.hypothesis}</span>` +
+        `<span class="cause-days">${e.days} дн. (${fmt(e.share_pct, 0)}%)</span>` +
+        `<span class="cause-bar-wrap"><span class="cause-bar" style="width:${e.share_pct}%"></span></span>` +
+        `</div>`,
+    )
+    .join("");
+  box.classList.remove("hidden");
 }
 
 function renderWeatherBadge(data) {
@@ -221,12 +245,15 @@ function renderResourceView(key) {
     last_anomaly: r.last_anomaly,
   });
 
+  const causeDiagnosis = data.cause_diagnosis || {};
   const adaptedSeries = r.series.map((d) => ({
     date: d.date,
     consumption_kwh: d.value,
     excess_kwh: d.excess,
     is_workday: d.is_workday,
     is_anomaly: d.is_anomaly,
+    pattern: d.pattern,
+    diagnosis: causeDiagnosis[d.date] || null,
   }));
 
   updateTableHeaders(r);
@@ -238,6 +265,8 @@ function renderResourceView(key) {
       r.co2_saved_kg != null ? (r.total_excess > 0 ? r.co2_saved_kg / r.total_excess : 0) : null,
   });
 }
+
+const PATTERN_CLASS = { устойчивая: "persistent", периодическая: "periodic", разовая: "oneoff" };
 
 function renderInsight({ summary, worst_day, first_anomaly, last_anomaly }) {
   const box = $("insight");
@@ -270,6 +299,12 @@ function renderTable(series, s) {
       s.co2_per_unit != null
         ? `${fmt(d.excess_kwh * s.co2_per_unit, 1)} кг`
         : `${fmt(d.excess_kwh, 1)} ${unit}`;
+    const patternCell = d.pattern
+      ? `<span class="pattern-chip ${PATTERN_CLASS[d.pattern] || ""}">${d.pattern}</span>`
+      : "—";
+    const reasonCell = d.diagnosis
+      ? `${d.diagnosis.hypothesis} <span class="confidence">(${d.diagnosis.confirming_signals}/${d.diagnosis.available_signals}, ${d.diagnosis.confidence_label})</span>`
+      : "—";
     tbody.insertAdjacentHTML(
       "beforeend",
       `<tr>
@@ -278,6 +313,8 @@ function renderTable(series, s) {
         <td class="num excess">+${fmt(d.excess_kwh, 1)} ${unit}</td>
         <td class="num">${fmt(d.excess_kwh * s.tariff_per_unit)} тенге</td>
         <td class="num">${co2Cell}</td>
+        <td>${patternCell}</td>
+        <td class="reason-cell">${reasonCell}</td>
       </tr>`,
     );
   }
@@ -966,6 +1003,48 @@ $("download-btn").addEventListener("click", () => {
   win.focus();
   win.print();
 });
+
+/* ---------- Telegram link + provenance table (fetched once, not per-analysis) ---------- */
+async function loadTelegramLink() {
+  try {
+    const res = await apiGet("/api/config");
+    const data = await res.json();
+    if (data.telegram_bot_username) {
+      const link = $("telegram-link");
+      link.href = `https://t.me/${data.telegram_bot_username}`;
+      link.classList.remove("hidden");
+    }
+  } catch {
+    // No backend reachable yet, or bot not configured — link just stays hidden.
+  }
+}
+
+const PROVENANCE_KIND_LABEL = { source: "источник", derived: "вывод", estimate: "оценка" };
+
+async function loadProvenanceTable() {
+  try {
+    const res = await apiGet("/api/provenance");
+    const entries = await res.json();
+    $("provenance-table").innerHTML = entries
+      .map((e) => {
+        const valueText = e.value === null ? "не задано" : fmt(e.value, e.value < 10 ? 3 : 1);
+        return (
+          `<div class="prov-row">` +
+          `<span class="prov-key">${e.key}</span>` +
+          `<span class="prov-value">${valueText}</span>` +
+          `<span class="prov-kind ${e.kind}">${PROVENANCE_KIND_LABEL[e.kind] || e.kind}</span>` +
+          `<span class="prov-note">${e.note}</span>` +
+          `</div>`
+        );
+      })
+      .join("");
+  } catch {
+    $("provenance-table").innerHTML = '<p class="muted">Не удалось загрузить источники — backend недоступен.</p>';
+  }
+}
+
+loadTelegramLink();
+loadProvenanceTable();
 
 // Load something immediately so the screen is never empty.
 analyze(new FormData());

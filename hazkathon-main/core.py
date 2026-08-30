@@ -169,3 +169,126 @@ def calculate_impact(
         "co2_saved_kg": round(total_excess * co2_kg_per_kwh, 2),
         "anomaly_days": int(df["is_anomaly"].sum()),
     }
+
+
+def diagnose_anomaly_day(resource_flags: dict, weather_adjusted: bool = False) -> dict | None:
+    """Cross-resource cause hypothesis for one day, from a simple rule table —
+    not ML. `resource_flags` maps resource keys actually present in the file
+    ("electricity"/"water"/"heat") to whether that resource was anomalous on
+    this day. Returns None if nothing was anomalous.
+
+    The reasoning: electricity+heat together points to HVAC (heating/
+    ventilation left running); electricity alone (heat known and normal)
+    points to lighting/plug load; water anomalous without an electricity
+    anomaly looks like a leak, not occupancy-related waste — different
+    resources ruled out or in narrow down the cause the way independent
+    physical signals do, just with plain if/else instead of a model.
+
+    `confidence_label` is an explicit, checkable ratio — "how many of the
+    available independent signals confirm this" — not an invented percentage.
+    A day flagged even after weather_adjusted correction is one extra
+    confirming signal for an electricity-based hypothesis, because it already
+    survived the "maybe it's just cold" check.
+    """
+    if not resource_flags or not any(resource_flags.values()):
+        return None
+
+    elec = resource_flags.get("electricity")
+    water = resource_flags.get("water")
+    heat = resource_flags.get("heat")
+    heat_known = "heat" in resource_flags
+
+    if elec and heat:
+        hypothesis = (
+            "HVAC (отопление/вентиляция) — аномалия одновременно в электричестве и тепле"
+        )
+    elif elec and heat_known and not heat:
+        hypothesis = "Освещение или розеточная нагрузка — аномалия только в электричестве, тепло в норме"
+    elif elec and not heat_known:
+        hypothesis = "Электрооборудование — данные по теплу отсутствуют в файле, причина не сужена"
+    elif water and not elec:
+        hypothesis = "Утечка воды — аномалия не связана с занятостью здания (электричество в норме)"
+    elif heat and not elec:
+        hypothesis = "Отопление осталось включённым отдельно от электросистем"
+    else:
+        hypothesis = "Аномалия обнаружена, но сочетание ресурсов не подходит под известный сценарий"
+
+    available_signals = len(resource_flags)
+    confirming_signals = sum(1 for v in resource_flags.values() if v)
+    if weather_adjusted and elec:
+        # A flagged day that already survived the weather-fairness check is
+        # stronger evidence of real waste than an unadjusted flag would be.
+        available_signals += 1
+        confirming_signals += 1
+
+    ratio = confirming_signals / available_signals if available_signals else 0.0
+    if ratio >= 0.66:
+        confidence_label = "высокая"
+    elif ratio >= 0.34:
+        confidence_label = "средняя"
+    else:
+        confidence_label = "низкая"
+
+    return {
+        "hypothesis": hypothesis,
+        "confirming_signals": confirming_signals,
+        "available_signals": available_signals,
+        "confidence_label": confidence_label,
+    }
+
+
+PERSISTENT_RUN_MIN_DAYS = 3
+
+
+def classify_anomaly_shapes(df: pd.DataFrame) -> dict:
+    """Classify each anomalous day's shape in time — pure sequence statistics
+    on the existing `is_anomaly` column, not ML:
+
+    - "устойчивая" (persistent): part of a run of >= PERSISTENT_RUN_MIN_DAYS
+      consecutive anomalous days — looks like equipment simply never switched
+      off, or a forgotten mode.
+    - "периодическая" (periodic): not part of such a run, but its weekday
+      recurs as anomalous elsewhere in the same dataset — looks like a
+      recurring scheduling gap (e.g. every Saturday).
+    - "разовая" (one-off): an isolated day, neither of the above — looks like
+      a one-time human factor.
+
+    Different shapes call for different fixes, so this is worth surfacing
+    separately from the plain anomaly list. Requires `df` to already be
+    flagged by detect_anomalies()/detect_anomalies_weather_adjusted().
+    """
+    dates = df["date"].tolist()
+    flags = df["is_anomaly"].tolist()
+    n = len(flags)
+
+    run_length = [0] * n
+    i = 0
+    while i < n:
+        if flags[i]:
+            j = i
+            while j < n and flags[j]:
+                j += 1
+            for k in range(i, j):
+                run_length[k] = j - i
+            i = j
+        else:
+            i += 1
+
+    weekday_counts: dict[int, int] = {}
+    for i in range(n):
+        if flags[i]:
+            wd = dates[i].dayofweek
+            weekday_counts[wd] = weekday_counts.get(wd, 0) + 1
+
+    shapes: dict[str, str] = {}
+    for i in range(n):
+        if not flags[i]:
+            continue
+        iso = dates[i].strftime("%Y-%m-%d")
+        if run_length[i] >= PERSISTENT_RUN_MIN_DAYS:
+            shapes[iso] = "устойчивая"
+        elif weekday_counts[dates[i].dayofweek] >= 2:
+            shapes[iso] = "периодическая"
+        else:
+            shapes[iso] = "разовая"
+    return shapes
