@@ -326,7 +326,18 @@ function renderTable(series, s) {
 const W = 1000;
 const H = 380;
 const MARGIN = { top: 24, right: 22, bottom: 46, left: 64 };
-const COLORS = { workday: "#58a6ff", offday: "#484f58", anomaly: "#f85149" };
+// Mirrors the CSS custom properties in styles.css (:root) — kept as literal
+// hex here because inline SVG presentation attributes don't reliably resolve
+// var() across browsers, so this is the one place the palette is duplicated.
+const COLORS = { workday: "#2166a5", offday: "#8b95a1", anomaly: "#b3362b" };
+const INK = {
+  text: "#121820",
+  muted: "#5b6673",
+  grid: "#e7ebef",
+  amber: "#9c6b12",
+  surface: "#ffffff",
+  border: "#c7cfd8",
+};
 const MIN_SPAN = 4;
 
 const chartState = {
@@ -349,8 +360,8 @@ function defsGradients() {
       `<stop offset="0%" stop-color="${hex}" stop-opacity="0.95"/>` +
       `<stop offset="100%" stop-color="${hex}" stop-opacity="0.45"/></linearGradient>`)
     .join("")}<linearGradient id="g-area" x1="0" y1="0" x2="0" y2="1">` +
-    `<stop offset="0%" stop-color="#58a6ff" stop-opacity="0.3"/>` +
-    `<stop offset="100%" stop-color="#58a6ff" stop-opacity="0"/></linearGradient></defs>`;
+    `<stop offset="0%" stop-color="${COLORS.workday}" stop-opacity="0.28"/>` +
+    `<stop offset="100%" stop-color="${COLORS.workday}" stop-opacity="0"/></linearGradient></defs>`;
 }
 
 function makeY(maxV) {
@@ -362,21 +373,21 @@ function makeY(maxV) {
   for (let t = 0; t <= 4; t++) {
     const v = (maxKwh * t) / 4;
     const yy = yScale(v).toFixed(1);
-    grid += `<line x1="${MARGIN.left}" y1="${yy}" x2="${W - MARGIN.right}" y2="${yy}" stroke="#232a33"/>` +
-      `<text x="${MARGIN.left - 10}" y="${+yy + 4}" fill="#9aa4b2" font-size="11" text-anchor="end">${fmt(v)}</text>`;
+    grid += `<line x1="${MARGIN.left}" y1="${yy}" x2="${W - MARGIN.right}" y2="${yy}" stroke="${INK.grid}"/>` +
+      `<text x="${MARGIN.left - 10}" y="${+yy + 4}" fill="${INK.muted}" font-size="11" text-anchor="end">${fmt(v)}</text>`;
   }
-  grid += `<text x="12" y="${MARGIN.top - 6}" fill="#9aa4b2" font-size="11">кВт·ч</text>`;
+  grid += `<text x="12" y="${MARGIN.top - 6}" fill="${INK.muted}" font-size="11">кВт·ч</text>`;
   return { maxKwh, yScale, invert, grid, innerH };
 }
 
 function refLines(y, mean, showMean) {
   const tv = chartState.threshold;
   let out =
-    `<line x1="${MARGIN.left}" y1="${y.yScale(tv).toFixed(1)}" x2="${W - MARGIN.right}" y2="${y.yScale(tv).toFixed(1)}" stroke="#d29922" stroke-width="2" stroke-dasharray="7 5"/>` +
-    `<text x="${W - MARGIN.right}" y="${(y.yScale(tv) - 7).toFixed(1)}" fill="#d29922" font-size="11" text-anchor="end">порог ${fmt(tv, 1)}</text>`;
+    `<line x1="${MARGIN.left}" y1="${y.yScale(tv).toFixed(1)}" x2="${W - MARGIN.right}" y2="${y.yScale(tv).toFixed(1)}" stroke="${INK.amber}" stroke-width="2" stroke-dasharray="7 5"/>` +
+    `<text x="${W - MARGIN.right}" y="${(y.yScale(tv) - 7).toFixed(1)}" fill="${INK.amber}" font-size="11" text-anchor="end">порог ${fmt(tv, 1)}</text>`;
   if (showMean && mean > 0) {
-    out += `<line x1="${MARGIN.left}" y1="${y.yScale(mean).toFixed(1)}" x2="${W - MARGIN.right}" y2="${y.yScale(mean).toFixed(1)}" stroke="#8b949e" stroke-width="1" stroke-dasharray="2 5"/>` +
-      `<text x="${MARGIN.left + 4}" y="${(y.yScale(mean) - 6).toFixed(1)}" fill="#8b949e" font-size="10.5">ср. ${fmt(mean, 1)}</text>`;
+    out += `<line x1="${MARGIN.left}" y1="${y.yScale(mean).toFixed(1)}" x2="${W - MARGIN.right}" y2="${y.yScale(mean).toFixed(1)}" stroke="${INK.muted}" stroke-width="1" stroke-dasharray="2 5"/>` +
+      `<text x="${MARGIN.left + 4}" y="${(y.yScale(mean) - 6).toFixed(1)}" fill="${INK.muted}" font-size="10.5">ср. ${fmt(mean, 1)}</text>`;
   }
   return out;
 }
@@ -426,7 +437,7 @@ function xLabelsFor(items, xCenter, labels) {
   items.forEach((_, i) => {
     if (i % step) return;
     const lx = xCenter(i).toFixed(1);
-    out += `<text x="${lx}" y="${H - 12}" fill="#9aa4b2" font-size="11" text-anchor="middle" transform="rotate(-40 ${lx} ${H - 12})">${labels[i]}</text>`;
+    out += `<text x="${lx}" y="${H - 12}" fill="${INK.muted}" font-size="11" text-anchor="middle" transform="rotate(-40 ${lx} ${H - 12})">${labels[i]}</text>`;
   });
   return out;
 }
@@ -442,9 +453,9 @@ function drawBarsSvg(items, y) {
     const cx = xCenter(i);
     const yTop = y.yScale(d.kwh);
     const kind = d.excess > 0 ? "anomaly" : d.closed ? "offday" : "workday";
-    svg += `<rect class="bar" style="animation-delay:${Math.min(i * 14, 600)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${(MARGIN.top + y.innerH - yTop).toFixed(1)}" rx="4" fill="url(#g-${kind})"${d.excess > 0 ? ' stroke="#ff8b85" stroke-width="1"' : ""}/>`;
+    svg += `<rect class="bar" style="animation-delay:${Math.min(i * 14, 600)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${(MARGIN.top + y.innerH - yTop).toFixed(1)}" rx="4" fill="url(#g-${kind})"${d.excess > 0 ? ` stroke="${INK.surface}" stroke-width="1"` : ""}/>`;
     if ((chartState.anim || d.excess > 0) && (n <= 21 || d.excess > 0 || i % step === 0)) {
-      svg += `<text x="${cx.toFixed(1)}" y="${(yTop - 5).toFixed(1)}" fill="${d.excess > 0 ? COLORS.anomaly : "#9aa4b2"}" font-size="${d.excess > 0 ? 11 : 9.5}" font-weight="${d.excess > 0 ? 700 : 400}" text-anchor="middle">${d.excess > 0 ? "+" + fmt(d.excess) : fmt(d.kwh)}</text>`;
+      svg += `<text x="${cx.toFixed(1)}" y="${(yTop - 5).toFixed(1)}" fill="${d.excess > 0 ? COLORS.anomaly : INK.muted}" font-size="${d.excess > 0 ? 11 : 9.5}" font-weight="${d.excess > 0 ? 700 : 400}" text-anchor="middle">${d.excess > 0 ? "+" + fmt(d.excess) : fmt(d.kwh)}</text>`;
     }
   });
   svg += xLabelsFor(items, xCenter, items.map((d) => shortDate(d.label)));
@@ -458,9 +469,9 @@ function drawLineSvg(items, y) {
   const pts = items.map((d, i) => `${xCenter(i).toFixed(1)},${y.yScale(d.kwh).toFixed(1)}`);
   let svg =
     `<path class="fade-in" d="M${pts[0]} L${pts.join(" L")} L${xCenter(n - 1).toFixed(1)},${(MARGIN.top + y.innerH).toFixed(1)} L${MARGIN.left},${(MARGIN.top + y.innerH).toFixed(1)} Z" fill="url(#g-area)"/>` +
-    `<polyline points="${pts.join(" ")}" fill="none" stroke="#58a6ff" stroke-width="2.5" stroke-linejoin="round"/>`;
+    `<polyline points="${pts.join(" ")}" fill="none" stroke="${COLORS.workday}" stroke-width="2.5" stroke-linejoin="round"/>`;
   items.forEach((d, i) => {
-    svg += `<circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.kwh).toFixed(1)}" r="${d.excess > 0 ? 4.5 : 2.6}" fill="${d.color}"${d.excess > 0 ? ' stroke="#fff" stroke-width="1.2"' : ""}/>`;
+    svg += `<circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.kwh).toFixed(1)}" r="${d.excess > 0 ? 4.5 : 2.6}" fill="${d.color}"${d.excess > 0 ? ` stroke="${INK.surface}" stroke-width="1.2"` : ""}/>`;
   });
   svg += xLabelsFor(items, xCenter, items.map((d) => shortDate(d.label)));
   return { svg, xCenter };
@@ -481,7 +492,7 @@ function drawWeeklySvg(items, y) {
       if (sg.v <= 0) continue;
       svg += `<rect class="bar" style="animation-delay:${wi * 60}ms" x="${(cx - barW / 2).toFixed(1)}" y="${y1.toFixed(1)}" width="${barW.toFixed(1)}" height="${(y.yScale(acc) - y1).toFixed(1)}" rx="2" fill="${sg.color}"/>`;
     }
-    svg += `<text x="${cx.toFixed(1)}" y="${(y.yScale(acc) - 6).toFixed(1)}" fill="#e6edf3" font-size="10.5" font-weight="600" text-anchor="middle">${fmt(acc)}</text>`;
+    svg += `<text x="${cx.toFixed(1)}" y="${(y.yScale(acc) - 6).toFixed(1)}" fill="${INK.text}" font-size="10.5" font-weight="600" text-anchor="middle">${fmt(acc)}</text>`;
   });
   svg += xLabelsFor(items, xCenter, items.map((w) => w.label));
   return { svg, xCenter };
@@ -493,12 +504,12 @@ function drawCumulativeSvg(items, y) {
   const xCenter = (i) => MARGIN.left + i * slot + slot / 2;
   const pt = (key) => items.map((d, i) => `${xCenter(i).toFixed(1)},${y.yScale(d[key]).toFixed(1)}`).join(" ");
   let svg =
-    `<polyline points="${pt("total")}" fill="none" stroke="#58a6ff" stroke-width="2.6" stroke-linejoin="round"/>` +
+    `<polyline points="${pt("total")}" fill="none" stroke="${COLORS.workday}" stroke-width="2.6" stroke-linejoin="round"/>` +
     `<polyline points="${pt("waste")}" fill="none" stroke="${COLORS.anomaly}" stroke-width="2.2" stroke-dasharray="5 4"/>` +
-    `<text x="${MARGIN.left + 6}" y="${MARGIN.top + 2}" fill="#58a6ff" font-size="11">— накопительно, кВт·ч</text>` +
+    `<text x="${MARGIN.left + 6}" y="${MARGIN.top + 2}" fill="${COLORS.workday}" font-size="11">— накопительно, кВт·ч</text>` +
     `<text x="${MARGIN.left + 168}" y="${MARGIN.top + 2}" fill="${COLORS.anomaly}" font-size="11">-- накопительные потери</text>`;
   items.forEach((d, i) => {
-    svg += `<circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.total).toFixed(1)}" r="2.4" fill="#58a6ff"/><circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.waste).toFixed(1)}" r="2.2" fill="${COLORS.anomaly}"/>`;
+    svg += `<circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.total).toFixed(1)}" r="2.4" fill="${COLORS.workday}"/><circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.waste).toFixed(1)}" r="2.2" fill="${COLORS.anomaly}"/>`;
   });
   svg += xLabelsFor(items, xCenter, items.map((d) => d.label));
   return { svg, xCenter };
@@ -515,11 +526,13 @@ function attachInteraction(svgEl, geom, describe) {
   const mk = (tag) => document.createElementNS(NS, tag);
   const set = (el, attrs) => { for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); };
 
-  const vLine = mk("line"); set(vLine, { stroke: "#8b949e", "stroke-dasharray": "3 3", opacity: 0 });
-  const hLine = mk("line"); set(hLine, { stroke: "#8b949e", "stroke-dasharray": "3 3", opacity: 0 });
-  const selRect = mk("rect"); set(selRect, { fill: "rgba(88,166,255,.16)", stroke: "#58a6ff", "stroke-dasharray": "4 3", opacity: 0 });
+  const vLine = mk("line"); set(vLine, { stroke: INK.muted, "stroke-dasharray": "3 3", opacity: 0 });
+  const hLine = mk("line"); set(hLine, { stroke: INK.muted, "stroke-dasharray": "3 3", opacity: 0 });
+  const selRect = mk("rect"); set(selRect, { fill: "rgba(33,102,165,.12)", stroke: COLORS.workday, "stroke-dasharray": "4 3", opacity: 0 });
   const yG = mk("g"), yR = mk("rect"), yT = mk("text");
-  set(yR, { fill: "#1c2129", stroke: "#3b4250", rx: 3 }); set(yT, { fill: "#e6edf3", "font-size": "10.5", "text-anchor": "middle" });
+  // Inverted (dark pill, light text) on purpose — a small transient tooltip
+  // popping against the light chart, not a section of the page theme.
+  set(yR, { fill: INK.text, stroke: INK.text, rx: 3 }); set(yT, { fill: "#ffffff", "font-size": "10.5", "text-anchor": "middle" });
   yG.append(yR, yT); set(yG, { opacity: 0 });
   svgEl.append(selRect, vLine, hLine, yG);
 
@@ -673,8 +686,8 @@ function drawDonut(series) {
     angle += sweep;
   }
   const center =
-    `<text x="${cx}" y="${cy - 8}" text-anchor="middle" fill="#e6edf3" font-size="24" font-weight="700">${fmt(total)}</text>` +
-    `<text x="${cx}" y="${cy + 12}" text-anchor="middle" fill="#9aa4b2" font-size="11">кВт·ч всего · ${series.length} дн.</text>` +
+    `<text x="${cx}" y="${cy - 8}" text-anchor="middle" fill="${INK.text}" font-size="24" font-weight="700">${fmt(total)}</text>` +
+    `<text x="${cx}" y="${cy + 12}" text-anchor="middle" fill="${INK.muted}" font-size="11">кВт·ч всего · ${series.length} дн.</text>` +
     `<text x="${cx}" y="${cy + 30}" text-anchor="middle" fill="${COLORS.anomaly}" font-size="11.5" font-weight="600">${((waste / total) * 100).toFixed(1)}% — потери</text>`;
   const rows = slices.map((s) =>
     `<div class="row${s.color === COLORS.anomaly ? " waste" : ""}"><span class="swatch" style="background:${s.color}"></span><span class="name">${s.name}</span><span class="val">${fmt(s.val, 1)} кВт·ч</span><span class="pct">${((s.val / total) * 100).toFixed(1)}%</span></div>`).join("");

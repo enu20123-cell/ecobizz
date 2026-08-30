@@ -6,3 +6,9 @@ venv/
 .env
 *.egg-info/
 .DS_Store
+
+# Local Claude Code skill tooling (npx skills add) — machine-specific
+# symlinks, not project source.
+.claude/skills/
+.agents/
+skills-lock.json
