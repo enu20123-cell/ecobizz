@@ -32,6 +32,9 @@
       <a class="btn telegram js-telegram-link hidden" href="#" target="_blank" rel="noopener noreferrer">
         💬 Открыть бота в Telegram
       </a>
+      <span class="privacy-badge" id="privacy-badge" title="Загруженный файл обрабатывается в памяти и никогда не записывается на диск сервера — после ответа от него не остаётся следа.">
+        🔒 Без сохранения файлов на сервере
+      </span>
     </div>
   </header>
 
@@ -50,6 +53,8 @@
         <button class="tab-btn" data-tab="forecast" type="button" role="tab" aria-selected="false">Прогноз</button>
         <button class="tab-btn" data-tab="ai" type="button" role="tab" aria-selected="false">AI-рекомендации</button>
         <button class="tab-btn" data-tab="data" type="button" role="tab" aria-selected="false">Данные по дням</button>
+        <button class="tab-btn" data-tab="portfolio" type="button" role="tab" aria-selected="false">Портфель объектов</button>
+        <button class="tab-btn" data-tab="ocr" type="button" role="tab" aria-selected="false">Фото квитанции</button>
         <button class="tab-btn" data-tab="telegram" type="button" role="tab" aria-selected="false">Telegram</button>
         <button class="tab-btn" data-tab="method" type="button" role="tab" aria-selected="false">О методе</button>
       </nav>
@@ -71,6 +76,31 @@
 
         <div id="weather-badge" class="weather-badge hidden"></div>
 
+        <section id="settings-panel" class="card settings-panel">
+          <div class="card-head">
+            <h2>Параметры расчёта</h2>
+            <button id="settings-toggle" class="btn ghost" type="button" aria-expanded="false">⚙ Показать параметры</button>
+          </div>
+          <div id="settings-body" class="settings-body hidden">
+            <p class="muted">Значения ниже — демо-оценки (см. вкладку «О методе»), не подтверждённые цифры конкретного объекта. Впишите реальные, если они появятся, и пересчитайте — без правки кода.</p>
+            <div class="settings-grid">
+              <label><span class="settings-label-row">CO₂ электричества <span class="tag estimate">оценка</span></span>
+                <input id="set-co2" type="number" step="0.01" min="0" value="0.85" /> <span class="unit">кг/кВт·ч</span></label>
+              <label><span class="settings-label-row">Тариф воды <span class="tag estimate">оценка</span></span>
+                <input id="set-water-tariff" type="number" step="0.01" min="0" value="141.33" /> <span class="unit">тенге/м³</span></label>
+              <label><span class="settings-label-row">Тариф тепла <span class="tag estimate">оценка</span></span>
+                <input id="set-heat-tariff" type="number" step="1" min="0" value="6540" /> <span class="unit">тенге/Гкал</span></label>
+              <label><span class="settings-label-row">CO₂ тепла <span class="tag estimate">оценка</span></span>
+                <input id="set-heat-co2" type="number" step="1" min="0" value="200" /> <span class="unit">кг/Гкал</span></label>
+              <label><span class="settings-label-row">Официальный норматив <span class="tag missing">не задано</span></span>
+                <input id="set-official-norm" type="number" step="1" min="0" placeholder="впишите, если известен" /> <span class="unit">кВт·ч/день</span></label>
+              <label><span class="settings-label-row">Площадь объекта <span class="tag missing">не задано</span></span>
+                <input id="set-area" type="number" step="1" min="0" placeholder="для класса A-F" /> <span class="unit">м²</span></label>
+            </div>
+            <button id="settings-apply" class="btn primary" type="button">Пересчитать с этими значениями</button>
+          </div>
+        </section>
+
         <div id="resource-switcher" class="seg resource-switcher hidden" role="tablist" aria-label="Ресурс"></div>
 
         <section id="insight" class="insight hidden"></section>
@@ -79,6 +109,37 @@
           <div class="card-head"><h2>Вероятные причины потерь</h2></div>
           <div id="cause-summary-body"></div>
           <p class="muted">Простая перекрёстная логика по ресурсам (не ML) — см. вкладку «О методе».</p>
+        </section>
+
+        <section id="floorplan-card" class="card hidden">
+          <div class="card-head"><h2>Схема здания — куда идти проверять</h2></div>
+          <div id="floorplan-svg"></div>
+          <div id="floorplan-legend" class="muted"></div>
+          <p class="muted">Подсветка зон — по уже посчитанной кросс-ресурсной диагностике причины (см. «Вероятные причины потерь» выше), не отдельная модель и не реальные датчики по зонам.</p>
+        </section>
+
+        <div class="compare-row">
+          <section id="norm-comparison-card" class="card hidden">
+            <div class="card-head"><h2>Факт vs официальный норматив</h2></div>
+            <div id="norm-comparison-body"></div>
+          </section>
+
+          <section id="efficiency-grade-card" class="card hidden">
+            <div class="card-head"><h2>Класс энергоэффективности</h2></div>
+            <div id="efficiency-grade-body"></div>
+          </section>
+        </div>
+
+        <section id="period-compare" class="card hidden">
+          <div class="card-head"><h2>Было / стало</h2></div>
+          <div id="period-compare-body"></div>
+          <p class="muted">Сравнение с предыдущим анализом этого же файла, сохранённым в этом браузере.</p>
+        </section>
+
+        <section id="live-counter-card" class="card hidden accent-card">
+          <div class="card-head"><h2>Счётчик потерь в реальном времени</h2></div>
+          <div class="live-counter-value" id="live-counter-value">0</div>
+          <p class="muted">тенге — при сохранении текущего паттерна потребления, с начала просмотра этой страницы. Не показания в реальном времени, а анимация уже посчитанной скорости потерь.</p>
         </section>
 
         <section class="kpis">
@@ -91,6 +152,7 @@
             <span class="kpi-label">Потери в тенге</span>
             <span class="kpi-value" id="kpi-kzt">—</span>
             <span class="kpi-unit">тенге можно вернуть</span>
+            <span class="kpi-range hidden" id="kpi-kzt-range"></span>
           </article>
           <article class="kpi green">
             <span class="kpi-label">Экономия CO₂</span>
@@ -165,10 +227,18 @@
       </section>
 
       <section id="tab-ai" class="tab-panel hidden" role="tabpanel">
+        <section id="top-priority-card" class="card hidden accent-card">
+          <div class="card-head"><h2>Если только одно действие</h2></div>
+          <div id="top-priority-body"></div>
+        </section>
+
         <section class="card">
           <div class="card-head">
             <h2>AI Copilot</h2>
-            <button id="insight-btn" class="btn primary" type="button">✨ Получить план действий</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="insight-btn" class="btn primary" type="button">✨ Получить план действий</button>
+              <button id="listen-btn" class="btn ghost hidden" type="button">🔊 Прослушать чек-лист</button>
+            </div>
           </div>
           <div id="insight-loading" class="loading hidden">
             <span class="spinner" aria-hidden="true"></span> Копилот готовит🔥🔥🔥...
@@ -176,13 +246,27 @@
           <div id="ai-data-block" class="ai-data-block hidden"></div>
           <p id="insight-text" class="insight-text hidden"></p>
         </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Обоснование для руководства</h2>
+            <button id="exec-summary-btn" class="btn ghost" type="button">📋 Сформировать</button>
+          </div>
+          <p class="muted">Короткий текст (3-4 предложения) языком для директора/акимата — можно сразу скопировать в письмо.</p>
+          <div id="exec-summary-loading" class="loading hidden"><span class="spinner" aria-hidden="true"></span> Готовим текст…</div>
+          <div id="exec-summary-box" class="insight-text hidden"></div>
+          <button id="exec-summary-copy" class="btn ghost hidden" type="button" style="margin-top:10px">⧉ Скопировать текст</button>
+        </section>
       </section>
 
       <section id="tab-data" class="tab-panel hidden" role="tabpanel">
         <section class="card">
           <div class="card-head">
             <h2>Отчёт по потерям</h2>
-            <button id="download-btn" class="btn ghost" type="button">⬇ Скачать отчёт</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="download-btn" class="btn ghost" type="button">⬇ Скачать отчёт</button>
+              <button id="download-memo-btn" class="btn ghost" type="button">📄 Служебная записка</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table id="anomaly-table">
@@ -203,6 +287,88 @@
           <p id="no-anomalies" class="empty hidden">
             Аномалий не обнаружено - здание корректно отключается в нерабочие дни. 🎉
           </p>
+        </section>
+      </section>
+
+      <section id="tab-portfolio" class="tab-panel hidden" role="tabpanel">
+        <section class="card">
+          <div class="card-head">
+            <h2>Портфель объектов</h2>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="portfolio-add-demo" class="btn ghost" type="button">+ Добавить оба демо-объекта</button>
+              <button id="portfolio-add-btn" class="btn primary" type="button">
+                + Добавить файлы
+                <input id="portfolio-file-input" type="file" accept=".csv,.xlsx,.xls" multiple hidden />
+              </button>
+            </div>
+          </div>
+          <p class="muted">Загрузите несколько файлов по разным школам/объектам (по одному или сразу пачкой) — здесь они сравниваются рядом, отсортированные по потенциальной экономии, чтобы решить, куда ехать в первую очередь. Ничего не сохраняется на сервере — только в памяти этой вкладки браузера.</p>
+          <div id="portfolio-loading" class="loading hidden"><span class="spinner" aria-hidden="true"></span> Анализируем объекты портфеля…</div>
+          <div id="portfolio-empty" class="empty">Пока не добавлено ни одного объекта.</div>
+          <div id="portfolio-summary" class="muted hidden" style="margin:10px 0"></div>
+          <div class="table-wrap">
+            <table id="portfolio-table" class="hidden">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Объект</th>
+                  <th class="num">Потери, кВт·ч</th>
+                  <th class="num">Потери, тенге</th>
+                  <th class="num">Аномальных дней</th>
+                  <th>База надёжна</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="tab-ocr" class="tab-panel hidden" role="tabpanel">
+        <section class="card">
+          <div class="card-head"><h2>Ввод по фото квитанции (OCR)</h2></div>
+          <p class="muted">
+            Альтернатива CSV/Excel — сфотографируйте или загрузите фото счёта за электроэнергию,
+            распознавание текста происходит прямо в браузере (Tesseract.js), ничего не отправляется
+            на сервер для OCR. Требует интернета при первом использовании (загрузка модели
+            распознавания); дальше можно проверить работу без сети. Распознанные цифры — черновик:
+            всегда проверяйте и поправьте дату/сумму перед добавлением.
+          </p>
+          <input id="ocr-file-input" type="file" accept="image/*" capture="environment" />
+          <div id="ocr-progress" class="loading hidden" style="justify-content:flex-start; padding:14px 0">
+            <span class="spinner" aria-hidden="true"></span> <span id="ocr-progress-text">Распознаём…</span>
+          </div>
+          <div id="ocr-error" class="status error hidden" style="margin-top:12px"></div>
+
+          <div id="ocr-result" class="hidden" style="margin-top:16px">
+            <div class="settings-grid" style="margin-bottom:10px">
+              <label><span class="settings-label-row">Дата</span>
+                <input id="ocr-date" type="date" /></label>
+              <label><span class="settings-label-row">Потребление</span>
+                <input id="ocr-kwh" type="number" step="0.01" min="0" /> <span class="unit">кВт·ч</span></label>
+            </div>
+            <details style="margin-bottom:10px">
+              <summary class="muted" style="cursor:pointer">Показать распознанный текст целиком</summary>
+              <pre id="ocr-raw-text" class="muted" style="white-space:pre-wrap; font-size:11.5px; margin-top:8px"></pre>
+            </details>
+            <button id="ocr-add-btn" class="btn primary" type="button">+ Добавить запись в историю</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>История по чекам</h2>
+            <button id="ocr-analyze-btn" class="btn primary" type="button" disabled>Проанализировать историю</button>
+          </div>
+          <p class="muted">Записи хранятся только в этой вкладке браузера. Нужно минимум несколько дней для осмысленного результата — база из 1-2 записей будет честно помечена как ненадёжная.</p>
+          <div id="ocr-history-empty" class="empty">Пока не добавлено ни одной записи.</div>
+          <div class="table-wrap">
+            <table id="ocr-history-table" class="hidden">
+              <thead><tr><th>Дата</th><th class="num">Потребление, кВт·ч</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </section>
       </section>
 
@@ -240,7 +406,27 @@
               <li>Мультиресурсность: электричество, вода и тепло — одна и та же статистика для каждого.</li>
               <li>Честный ИИ: Gemini получает только проверенные цифры и не придумывает числа.</li>
               <li>Доставка результата прямо в Telegram, без отдельного визита на сайт.</li>
+              <li>Без сохранения данных на сервере — важно для доверия госзаказчика (акиматов).</li>
             </ul>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>🔒 Обработка без сохранения данных</h2></div>
+          <div class="method-text">
+            <p>
+              Загруженный файл (CSV/Excel) обрабатывается <strong>целиком в оперативной памяти</strong>
+              процесса — backend читает его сразу в DataFrame и никогда не записывает на диск сервера
+              (нет ни одной операции записи файла в <code>backend/main.py</code> или <code>core.py</code>).
+              После того как ответ с результатами анализа отправлен браузеру, от загруженного файла на
+              сервере не остаётся ни копии, ни имени, ни логов содержимого.
+            </p>
+            <p class="muted">
+              Это архитектурное решение, а не переключаемый режим — так работает каждый запрос к
+              <code>/api/analyze</code>, без исключений. Важно для государственных заказчиков (акиматов,
+              школ), для которых передача данных о потреблении энергии третьей стороне без гарантии
+              удаления часто является блокером для пилота.
+            </p>
           </div>
         </section>
 

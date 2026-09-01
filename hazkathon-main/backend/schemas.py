@@ -28,6 +28,11 @@ class Summary(BaseModel):
     # instead of presenting the numbers as a confirmed result.
     baseline_reliable: bool = True
     off_day_samples: int = Field(default=0, ge=0)
+    # Bootstrap P10/P50/P90 range around savings_kzt — see
+    # core.bootstrap_savings_range(). None when too few non-working days to
+    # resample meaningfully; the UI should then show the point estimate alone.
+    savings_kzt_p10: float | None = None
+    savings_kzt_p90: float | None = None
 
 
 class ResourceRecord(BaseModel):
@@ -64,6 +69,8 @@ class ResourceSummary(BaseModel):
     worst_day: str | None = None
     first_anomaly: str | None = None
     last_anomaly: str | None = None
+    savings_kzt_p10: float | None = None
+    savings_kzt_p90: float | None = None
     series: list[ResourceRecord] = Field(default_factory=list)
 
 
@@ -86,6 +93,29 @@ class CauseSummaryEntry(BaseModel):
     share_pct: float = Field(ge=0, le=100)
 
 
+class NormComparison(BaseModel):
+    """Fact-vs-official-norm comparison — only present when the caller
+    supplies `official_norm_kwh_per_day` (never invented server-side, see
+    config.PROVENANCE['official_norm_kwh_per_day']). Independent of the
+    building's own statistical baseline — two independent methods agreeing
+    is stronger evidence than either alone."""
+
+    official_norm_kwh_per_day: float
+    actual_avg_kwh_per_day: float
+    over_norm_pct: float
+
+
+class EfficiencyGrade(BaseModel):
+    """A-F letter grade from annualized consumption intensity — see
+    core.energy_efficiency_grade(). Only present when the caller supplies
+    building_area_m2; never guessed without it."""
+
+    intensity_kwh_per_m2_year: float
+    kz_average_kwh_per_m2_year: float
+    ratio_to_average: float
+    grade: str
+
+
 class AnalyzeResponse(BaseModel):
     summary: Summary
     series: list[DayRecord]
@@ -104,6 +134,10 @@ class AnalyzeResponse(BaseModel):
     cause_diagnosis: dict[str, CauseDiagnosis] = Field(default_factory=dict)
     # Ranked by day count, descending — the period-level "what's usually behind this" view.
     cause_summary: list[CauseSummaryEntry] = Field(default_factory=list)
+    # Only present when the caller supplied official_norm_kwh_per_day.
+    norm_comparison: NormComparison | None = None
+    # Only present when the caller supplied building_area_m2.
+    efficiency_grade: EfficiencyGrade | None = None
 
 
 class InsightRequest(BaseModel):

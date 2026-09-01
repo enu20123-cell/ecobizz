@@ -237,6 +237,107 @@ def diagnose_anomaly_day(resource_flags: dict, weather_adjusted: bool = False) -
     }
 
 
+BOOTSTRAP_ITERATIONS = 500
+BOOTSTRAP_SEED = 42
+
+
+def bootstrap_savings_range(
+    df: pd.DataFrame,
+    tariff: float,
+    multiplier: float = BASELINE_MULTIPLIER,
+    value_column: str = "consumption_kwh",
+    n_iterations: int = BOOTSTRAP_ITERATIONS,
+    seed: int = BOOTSTRAP_SEED,
+) -> dict | None:
+    """P10/P50/P90 range for savings_kzt via bootstrap resampling — not Monte
+    Carlo simulation, a plain, explainable bootstrap of the one thing that is
+    actually uncertain here: the 25th-percentile baseline itself, estimated
+    from a limited sample of non-working days.
+
+    Each iteration resamples the non-working-day readings with replacement
+    (same size as the real sample), recomputes the 25th-percentile baseline
+    from that resample, then applies *that* baseline to the *real* off-day
+    readings to get a savings figure — repeated `n_iterations` times. The
+    spread of the resulting distribution is how sensitive the savings number
+    is to which particular days happened to land in the sample, nothing more
+    exotic. A fixed seed keeps the numbers stable across repeated calls on
+    the same data (a live demo re-running the same file should not show a
+    different range each time).
+
+    Returns None when there are too few non-working days to resample
+    meaningfully (same MIN_OFF_DAY_SAMPLES threshold as the point estimate);
+    callers should hide the range and keep showing the point estimate alone.
+    """
+    off_days = df.loc[df["is_workday"] == 0, value_column].to_numpy(dtype=float)
+    n = len(off_days)
+    if n < MIN_OFF_DAY_SAMPLES:
+        return None
+
+    rng = np.random.default_rng(seed)
+    savings = np.empty(n_iterations)
+    for i in range(n_iterations):
+        resample = rng.choice(off_days, size=n, replace=True)
+        baseline = np.percentile(resample, 25)
+        excess = np.where(off_days > baseline * multiplier, off_days - baseline, 0.0)
+        savings[i] = excess.sum() * tariff
+
+    p10, p50, p90 = np.percentile(savings, [10, 50, 90])
+    return {
+        "p10": round(float(p10), 2),
+        "p50": round(float(p50), 2),
+        "p90": round(float(p90), 2),
+        "iterations": n_iterations,
+    }
+
+
+KZ_AVERAGE_INTENSITY_KWH_PER_M2_YEAR = 270.0
+# Ratio-to-average upper bounds for each letter grade; anything above the
+# last bound falls through to "F". Deliberately simple, published thresholds
+# (config.PROVENANCE tags the calibration figure honestly) rather than a
+# trained model — explainable on Q&A in one sentence.
+ENERGY_GRADE_BANDS = [
+    (0.6, "A"),
+    (0.8, "B"),
+    (1.0, "C"),
+    (1.3, "D"),
+    (1.6, "E"),
+]
+
+
+def energy_efficiency_grade(
+    total_consumption: float,
+    days_analyzed: int,
+    area_m2: float | None,
+    kz_average: float = KZ_AVERAGE_INTENSITY_KWH_PER_M2_YEAR,
+) -> dict | None:
+    """A-F letter grade from annualized consumption intensity (kWh/m2/year)
+    against the Kazakhstan average. Returns None when the building's area is
+    unknown — never guesses a grade without the data to support it.
+
+    `total_consumption` is the *full* period sum (workdays included, not just
+    excess) — intensity describes how much energy the building uses overall,
+    not just how much it wastes. The period is annualized
+    (`total / days_analyzed * 365`) so a one-month file and a one-year file
+    are graded on the same basis.
+    """
+    if not area_m2 or area_m2 <= 0 or days_analyzed <= 0:
+        return None
+    annualized = total_consumption / days_analyzed * 365.0
+    intensity = annualized / area_m2
+    ratio = intensity / kz_average
+    grade = "F"
+    for bound, letter in ENERGY_GRADE_BANDS:
+        if ratio <= bound:
+            grade = letter
+            break
+    return {
+        "intensity_kwh_per_m2_year": round(intensity, 1),
+        "kz_average_kwh_per_m2_year": kz_average,
+        "ratio_to_average": round(ratio, 2),
+        "grade": grade,
+    }
+
+
 PERSISTENT_RUN_MIN_DAYS = 3
 
 
