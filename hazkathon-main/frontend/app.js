@@ -71,6 +71,27 @@ function reqTimeout(ms) {
 let currentMultiplier = 1.5;
 let lastSampleParam = "default"; // remembers which bundled sample is active, for live re-runs
 
+// Reads the "Параметры расчёта" panel — editable overrides for the
+// config.py constants still tagged "estimate" (see /api/provenance). Their
+// defaults match the backend's own defaults exactly, so including them on
+// every request is a no-op until the user actually edits one; that also
+// means a tariff/multiplier re-run never silently drops an edited value.
+function currentSettingsParams() {
+  const params = {
+    co2_factor: $("set-co2").value,
+    water_tariff: $("set-water-tariff").value,
+    heat_tariff: $("set-heat-tariff").value,
+    heat_co2_factor: $("set-heat-co2").value,
+  };
+  const norm = $("set-official-norm").value;
+  const area = $("set-area").value;
+  // Never defaulted — omitted entirely unless the user actually filled them
+  // in, so the backend never invents a norm/area comparison.
+  if (norm !== "") params.official_norm_kwh_per_day = norm;
+  if (area !== "") params.building_area_m2 = area;
+  return params;
+}
+
 async function analyze(formData, label, extraParams = {}) {
   $("results").classList.add("hidden");
   $("loading-text").textContent = label
@@ -85,6 +106,7 @@ async function analyze(formData, label, extraParams = {}) {
       // reports weather_adjusted: false) whenever weather data isn't
       // available, so this is always safe to ask for.
       weather_adjust: "true",
+      ...currentSettingsParams(),
       ...extraParams,
     });
     const res = await apiPost(`/api/analyze?${params.toString()}`, {
@@ -109,6 +131,12 @@ async function analyze(formData, label, extraParams = {}) {
 let lastAnalysis = null; // reused for the AI Copilot and tariff re-runs
 let lastInsight = null; // last Gemini/offline recommendation, reused by the report download
 let currentResourceKey = "electricity";
+// The actual uploaded File object, kept around so the tariff/multiplier/
+// settings controls can re-run /api/analyze against the SAME data without
+// re-reading <input type=file> — the browser clears that input's FileList
+// once used, so a second read is impossible; re-sending the stored File
+// object works because a File is just an immutable Blob reference.
+let uploadedFile = null;
 
 const RESOURCE_ORDER = ["electricity", "water", "heat"];
 const RESOURCE_LOSS_LABEL = {
@@ -131,14 +159,362 @@ function render(data) {
   lastAnalysis = data;
   renderWeatherBadge(data);
   renderCauseSummary(data);
+  renderFloorPlan(data);
+  renderTopPriority(data);
+  renderNormComparison(data);
+  renderEfficiencyGrade(data);
   renderForecast(data);
   buildResourceSwitcher(data);
   const keys = Object.keys(data.resources || {});
   renderResourceView(keys.includes("electricity") ? "electricity" : keys[0]);
+  renderPeriodCompare(data);
+  startLiveCounter(data);
 
   $("results").classList.remove("hidden");
   resetCopilot();
+  updateListenButton(data);
   showTab("overview");
+}
+
+/* ---------- Floor-plan zone highlight — reuses cause_summary, no new logic ---------- */
+// Each zone maps to one of the fixed hypothesis strings core.diagnose_anomaly_day()
+// produces (see core.py) — a plain lookup, not a new diagnosis of its own.
+const FLOORPLAN_ZONES = [
+  { label: "Серверная", x: 16, y: 14, w: 138, h: 92, match: (h) => h.includes("Электрооборудование") },
+  { label: "Классы / аудитории", x: 168, y: 14, w: 138, h: 92, match: (h) => h.includes("HVAC") },
+  { label: "Столовая, сан.узлы", x: 320, y: 14, w: 138, h: 92, match: (h) => h.includes("Утечка воды") },
+  { label: "Охрана и освещение", x: 472, y: 14, w: 138, h: 92, match: (h) => h.includes("Освещение") },
+  { label: "Котельная / отопление", x: 168, y: 158, w: 290, h: 66, match: (h) => h.includes("Отопление осталось") },
+];
+
+function renderFloorPlan(data) {
+  const box = $("floorplan-card");
+  const entries = data.cause_summary || [];
+  if (!entries.length) {
+    box.classList.add("hidden");
+    return;
+  }
+
+  const hits = FLOORPLAN_ZONES.map((zone) => ({
+    zone,
+    hit: entries.find((e) => zone.match(e.hypothesis)),
+  }));
+
+  const W2 = 626, H2 = 240;
+  let svg = `<svg viewBox="0 0 ${W2} ${H2}" role="img" aria-label="Схема здания с подсветкой вероятных причин потерь">`;
+  svg += `<rect x="0" y="118" width="${W2}" height="24" fill="${INK.surface}" stroke="${INK.border}"/>`;
+  svg += `<text x="${W2 / 2}" y="134" text-anchor="middle" fill="${INK.muted}" font-size="11">коридор</text>`;
+
+  hits.forEach(({ zone, hit }) => {
+    const share = hit ? hit.share_pct : 0;
+    const opacity = hit ? Math.min(0.55, 0.18 + share / 150) : 0;
+    const fill = hit ? COLORS.anomaly : INK.surface;
+    svg +=
+      `<rect x="${zone.x}" y="${zone.y}" width="${zone.w}" height="${zone.h}" rx="6" ` +
+      `fill="${fill}" fill-opacity="${hit ? opacity : 1}" stroke="${hit ? COLORS.anomaly : INK.border}" stroke-width="${hit ? 2 : 1}"/>`;
+    svg += `<text x="${zone.x + zone.w / 2}" y="${zone.y + zone.h / 2 - 4}" text-anchor="middle" fill="${hit ? INK.text : INK.muted}" font-size="12" font-weight="${hit ? 700 : 400}">${zone.label}</text>`;
+    if (hit) {
+      svg += `<text x="${zone.x + zone.w / 2}" y="${zone.y + zone.h / 2 + 14}" text-anchor="middle" fill="${INK.text}" font-size="11">${hit.days} дн. (${fmt(hit.share_pct, 0)}%)</text>`;
+    }
+  });
+  svg += `</svg>`;
+  $("floorplan-svg").innerHTML = svg;
+
+  const matched = hits.filter((h) => h.hit);
+  $("floorplan-legend").textContent = matched.length
+    ? `Подсвечено по факту диагностированных причин: ${matched.map((h) => `${h.zone.label} — ${h.hit.hypothesis.split(" — ")[0].split(" (")[0]}`).join("; ")}.`
+    : "Ни одна зона не сопоставлена с диагностированными причинами в этом наборе данных.";
+  box.classList.remove("hidden");
+}
+
+/* ---------- "Если только одно действие" — top priority, from cause_summary ---------- */
+// Short action phrases keyed by substring of the fixed hypothesis strings
+// core.diagnose_anomaly_day() produces — a lookup table, not new logic.
+function actionForHypothesis(h) {
+  if (h.includes("HVAC")) return "Проверьте расписание отопления и вентиляции на отмеченные нерабочие дни — переключите его в энергосберегающий режим.";
+  if (h.includes("Освещение")) return "Проверьте таймеры освещения и розеточной нагрузки — обновите их под нерабочий график.";
+  if (h.includes("Электрооборудование")) return "Обойдите здание в ближайший нерабочий день и проверьте, какое оборудование осталось включённым.";
+  if (h.includes("Утечка")) return "Вызовите сантехника — проверьте краны, трубы и санузлы на утечку.";
+  if (h.includes("Отопление осталось")) return "Проверьте котельную / тепловой узел отдельно от электросистем здания.";
+  return "Проверьте отмеченные дни и системы вручную.";
+}
+
+// Ranks hypotheses by the tenge they were actually responsible for (summed
+// over every resource's excess on each diagnosed date), not just day count —
+// a plain aggregation of numbers /api/analyze already computed, no new math.
+function computeTopPriorityAction(data) {
+  const diag = data.cause_diagnosis || {};
+  const dates = Object.keys(diag);
+  if (!dates.length) return null;
+
+  const kztByDate = {};
+  for (const r of Object.values(data.resources || {})) {
+    for (const d of r.series) {
+      if (d.is_anomaly && d.excess > 0) {
+        kztByDate[d.date] = (kztByDate[d.date] || 0) + d.excess * r.tariff_kzt_per_unit;
+      }
+    }
+  }
+
+  const byHypothesis = {};
+  for (const date of dates) {
+    const h = diag[date].hypothesis;
+    byHypothesis[h] = (byHypothesis[h] || 0) + (kztByDate[date] || 0);
+  }
+  const totalKzt = Object.values(byHypothesis).reduce((a, b) => a + b, 0);
+  const ranked = Object.entries(byHypothesis).sort((a, b) => b[1] - a[1]);
+  if (!ranked.length) return null;
+  const [hypothesis, kzt] = ranked[0];
+  return {
+    hypothesis,
+    kzt,
+    sharePct: totalKzt > 0 ? (kzt / totalKzt) * 100 : 0,
+    days: dates.filter((d) => diag[d].hypothesis === hypothesis).length,
+  };
+}
+
+function renderTopPriority(data) {
+  const box = $("top-priority-card");
+  const top = computeTopPriorityAction(data);
+  if (!top) {
+    box.classList.add("hidden");
+    return;
+  }
+  $("top-priority-body").innerHTML =
+    `<p style="font-size:16px; margin-bottom:6px">${actionForHypothesis(top.hypothesis)}</p>` +
+    `<p class="muted">Причина «${top.hypothesis.split(" — ")[0]}» отвечает за <strong>${fmt(top.sharePct, 0)}%</strong> ` +
+    `посчитанного перерасхода (~${fmt(top.kzt)} тенге, ${top.days} дн.) — это единственное действие с наибольшей отдачей, если время ограничено.</p>`;
+  box.classList.remove("hidden");
+}
+
+/* ---------- Audio checklist (Web Speech API) ---------- */
+function buildChecklistText(data) {
+  const entries = data.cause_summary || [];
+  if (!entries.length) return "";
+  const zoneFor = (h) => (FLOORPLAN_ZONES.find((z) => z.match(h)) || {}).label;
+  const items = entries
+    .slice(0, 5)
+    .map((e, i) => {
+      const zone = zoneFor(e.hypothesis);
+      const place = zone ? `в зоне «${zone}»` : "";
+      return `Пункт ${i + 1}. ${actionForHypothesis(e.hypothesis)} ${place}. Затронуто ${e.days} дн., это ${Math.round(e.share_pct)} процентов случаев.`;
+    });
+  return `Чек-лист обхода здания. Всего пунктов: ${items.length}. ` + items.join(" ");
+}
+
+function updateListenButton(data) {
+  const btn = $("listen-btn");
+  if (!window.speechSynthesis || !buildChecklistText(data)) {
+    btn.classList.add("hidden");
+    return;
+  }
+  btn.classList.remove("hidden");
+  btn.dataset.speaking = "false";
+}
+
+$("listen-btn").addEventListener("click", () => {
+  if (!window.speechSynthesis || !lastAnalysis) return;
+  const btn = $("listen-btn");
+  if (btn.dataset.speaking === "true") {
+    speechSynthesis.cancel();
+    btn.dataset.speaking = "false";
+    btn.textContent = "🔊 Прослушать чек-лист";
+    return;
+  }
+  const text = buildChecklistText(lastAnalysis);
+  if (!text) return;
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "ru-RU";
+  utter.rate = 0.98;
+  utter.onend = () => {
+    btn.dataset.speaking = "false";
+    btn.textContent = "🔊 Прослушать чек-лист";
+  };
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utter);
+  btn.dataset.speaking = "true";
+  btn.textContent = "⏹ Остановить";
+});
+
+/* ---------- Short executive justification ---------- */
+$("exec-summary-btn").addEventListener("click", async () => {
+  if (!lastAnalysis) return;
+  $("exec-summary-box").classList.add("hidden");
+  $("exec-summary-copy").classList.add("hidden");
+  $("exec-summary-loading").classList.remove("hidden");
+  try {
+    const res = await apiPost("/api/insight?brief=true", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: lastAnalysis.source,
+        summary: lastAnalysis.summary,
+        anomalies: lastAnalysis.series.filter((d) => d.is_anomaly),
+      }),
+      signal: reqTimeout(150000),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) throw new Error(data?.detail || `Ошибка запроса (${res.status})`);
+    $("exec-summary-box").textContent = data.insight;
+    $("exec-summary-box").classList.remove("hidden");
+    $("exec-summary-copy").classList.remove("hidden");
+  } catch (err) {
+    showStatus(`Не удалось сформировать текст — ${err.message}`, true);
+    setTimeout(hideStatus, 6000);
+  } finally {
+    $("exec-summary-loading").classList.add("hidden");
+  }
+});
+
+$("exec-summary-copy").addEventListener("click", async () => {
+  const text = $("exec-summary-box").textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    showStatus("Текст скопирован в буфер обмена.");
+    setTimeout(hideStatus, 3000);
+  } catch {
+    showStatus("Не удалось скопировать автоматически — выделите текст вручную.", true);
+    setTimeout(hideStatus, 5000);
+  }
+});
+
+function renderNormComparison(data) {
+  const box = $("norm-comparison-card");
+  const n = data.norm_comparison;
+  if (!n) {
+    box.classList.add("hidden");
+    return;
+  }
+  const over = n.over_norm_pct;
+  const verdict = over > 0 ? `на <strong>${fmt(Math.abs(over), 1)}%</strong> выше норматива` : `на <strong>${fmt(Math.abs(over), 1)}%</strong> ниже норматива`;
+  $("norm-comparison-body").innerHTML =
+    `<p class="norm-line">Факт: <strong>${fmt(n.actual_avg_kwh_per_day, 1)}</strong> кВт·ч/день</p>` +
+    `<p class="norm-line">Норматив: <strong>${fmt(n.official_norm_kwh_per_day, 1)}</strong> кВт·ч/день <span class="tag missing">введено вручную</span></p>` +
+    `<p class="muted">Фактическое потребление ${verdict}. Независимая проверка вторым методом — не статистикой по этому же зданию, а внешним нормативом.</p>`;
+  box.classList.remove("hidden");
+}
+
+const GRADE_HINT = {
+  A: "заметно лучше среднего по РК", B: "лучше среднего", C: "около среднего по РК",
+  D: "хуже среднего", E: "заметно хуже среднего", F: "существенно выше среднего по РК",
+};
+
+function renderEfficiencyGrade(data) {
+  const box = $("efficiency-grade-card");
+  const g = data.efficiency_grade;
+  if (!g) {
+    box.classList.add("hidden");
+    return;
+  }
+  $("efficiency-grade-body").innerHTML =
+    `<div class="grade-row">` +
+    `<span class="grade-badge ${g.grade}">${g.grade}</span>` +
+    `<div><div class="grade-line"><strong>${fmt(g.intensity_kwh_per_m2_year, 1)}</strong> кВт·ч/м²/год</div>` +
+    `<div class="muted">${GRADE_HINT[g.grade] || ""} · среднее по РК ${fmt(g.kz_average_kwh_per_m2_year, 0)} кВт·ч/м²/год (${g.ratio_to_average}×)</div></div>` +
+    `</div>`;
+  box.classList.remove("hidden");
+}
+
+/* ---------- Period-over-period (was/now), localStorage-backed ---------- */
+// One slot, not keyed by filename: "second upload" is the trigger, whatever
+// it's called — a school re-exporting the same report.csv every month and
+// someone comparing two differently-named files should both just work.
+const PERIOD_STORAGE_KEY = "ecobiz_last_period";
+
+// A cheap fingerprint of "same underlying dataset" (row count + date span) —
+// re-running the same file with a different tariff/multiplier must not look
+// like a new period to compare against.
+function periodFingerprint(data) {
+  const s = data.series;
+  return `${s.length}|${s[0]?.date}|${s[s.length - 1]?.date}`;
+}
+
+function snapshotOf(data) {
+  const s = data.summary;
+  const series = data.series;
+  return {
+    total_excess_kwh: s.total_excess_kwh,
+    savings_kzt: s.savings_kzt,
+    anomaly_days: s.anomaly_days,
+    first: series[0]?.date,
+    last: series[series.length - 1]?.date,
+  };
+}
+
+function renderPeriodCompareBody(prevSnap, data) {
+  const s = data.summary;
+  const series = data.series;
+  const dExcess = s.total_excess_kwh - prevSnap.total_excess_kwh;
+  const better = dExcess <= 0;
+  $("period-compare-body").innerHTML =
+    `<p class="period-row">Прошлый раз (${prevSnap.first} — ${prevSnap.last}): <strong>${fmt(prevSnap.total_excess_kwh, 1)}</strong> кВт·ч перерасхода · <strong>${fmt(prevSnap.savings_kzt)}</strong> тенге.</p>` +
+    `<p class="period-row">Сейчас (${series[0]?.date} — ${series[series.length - 1]?.date}): <strong>${fmt(s.total_excess_kwh, 1)}</strong> кВт·ч · <strong>${fmt(s.savings_kzt)}</strong> тенге.</p>` +
+    `<p class="period-row">Изменение: <span class="period-delta ${better ? "better" : "worse"}">${better ? "▼" : "▲"} ${fmt(Math.abs(dExcess), 1)} кВт·ч — ${better ? "лучше, чем в прошлый раз" : "хуже, чем в прошлый раз"}</span></p>`;
+}
+
+function renderPeriodCompare(data) {
+  const box = $("period-compare");
+  const fp = periodFingerprint(data);
+  let prev = null;
+  try {
+    prev = JSON.parse(localStorage.getItem(PERIOD_STORAGE_KEY) || "null");
+  } catch {
+    prev = null;
+  }
+
+  if (prev && prev.fingerprint === fp) {
+    // Same dataset re-rendered under a different tariff/multiplier — keep
+    // showing whatever comparison already existed, don't treat this as a
+    // second upload of the same file.
+    if (prev.comparedAgainst) {
+      renderPeriodCompareBody(prev.comparedAgainst, data);
+      box.classList.remove("hidden");
+    } else {
+      box.classList.add("hidden");
+    }
+    return;
+  }
+
+  const nextRecord = { fingerprint: fp, snapshot: snapshotOf(data) };
+  if (prev) {
+    renderPeriodCompareBody(prev.snapshot, data);
+    box.classList.remove("hidden");
+    nextRecord.comparedAgainst = prev.snapshot;
+  } else {
+    box.classList.add("hidden");
+  }
+  try {
+    localStorage.setItem(PERIOD_STORAGE_KEY, JSON.stringify(nextRecord));
+  } catch {
+    // Private-browsing / storage-full — comparison just won't persist, not fatal.
+  }
+}
+
+/* ---------- Live real-time loss counter ---------- */
+let liveCounterHandle = null;
+
+function startLiveCounter(data) {
+  if (liveCounterHandle) {
+    clearInterval(liveCounterHandle);
+    liveCounterHandle = null;
+  }
+  const s = data.summary;
+  if (!s.anomaly_days || s.savings_kzt <= 0 || !s.days_analyzed) {
+    $("live-counter-card").classList.add("hidden");
+    return;
+  }
+  // Honest rate, not a live meter reading: total losses already computed for
+  // the period, spread evenly over the period's own length in seconds.
+  const periodSeconds = s.days_analyzed * 86400;
+  const ratePerSecond = s.savings_kzt / periodSeconds;
+  $("live-counter-card").classList.remove("hidden");
+  const start = performance.now();
+  const tick = () => {
+    const elapsed = (performance.now() - start) / 1000;
+    $("live-counter-value").textContent = fmt(ratePerSecond * elapsed, 2);
+  };
+  tick();
+  liveCounterHandle = setInterval(tick, 200);
 }
 
 function renderCauseSummary(data) {
@@ -269,6 +645,13 @@ function renderResourceView(key) {
   setKpiUnit("kpi-excess", `${r.unit} сверх базового уровня`);
 
   $("kpi-kzt").textContent = fmt(r.savings_kzt);
+  const rangeEl = $("kpi-kzt-range");
+  if (r.savings_kzt_p10 != null && r.savings_kzt_p90 != null) {
+    rangeEl.textContent = `P10—P90: ${fmt(r.savings_kzt_p10)}–${fmt(r.savings_kzt_p90)} тенге (бутстрэп, 500 итераций)`;
+    rangeEl.classList.remove("hidden");
+  } else {
+    rangeEl.classList.add("hidden");
+  }
   $("kpi-days").textContent = r.anomaly_days;
   $("kpi-quarterly").textContent = fmt(r.savings_kzt * 3);
   $("kpi-yearly").textContent = fmt(r.savings_kzt * 12);
@@ -838,6 +1221,12 @@ function resetCopilot() {
   $("insight-loading").classList.add("hidden");
   lastInsight = null;
   renderAiDataBlock();
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  $("listen-btn").dataset.speaking = "false";
+  $("listen-btn").textContent = "🔊 Прослушать чек-лист";
+  $("exec-summary-box").classList.add("hidden");
+  $("exec-summary-box").textContent = "";
+  $("exec-summary-copy").classList.add("hidden");
 }
 
 // Minimal safe Markdown renderer (headings, bullets, bold, code) — input is
@@ -920,6 +1309,7 @@ $("upload-btn").addEventListener("click", () => $("file-input").click());
 $("file-input").addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (file) {
+    uploadedFile = file; // kept for live re-runs from the tariff/slider/settings controls
     const formData = new FormData();
     formData.append("file", file);
     // Passing the filename makes the loading state show which file is
@@ -931,11 +1321,13 @@ $("file-input").addEventListener("change", (e) => {
 });
 
 $("sample-btn").addEventListener("click", () => {
+  uploadedFile = null;
   lastSampleParam = "default";
   analyze(new FormData());
 });
 
 $("sample-multi-btn").addEventListener("click", () => {
+  uploadedFile = null;
   lastSampleParam = "multi";
   analyze(new FormData(), null, { sample: "multi" });
 });
@@ -944,18 +1336,37 @@ function isBundledSample(source) {
   return source === "sample_data.csv" || source === "sample_data_multi.csv";
 }
 
+// Shared by the tariff input, threshold slider and settings panel: re-runs
+// /api/analyze against whatever is currently loaded — the bundled sample by
+// name, or the actual uploaded File object kept in `uploadedFile` (not a
+// re-read of the file input, which the browser has already cleared).
+function rerunWithCurrentSource() {
+  if (!lastAnalysis) return;
+  if (isBundledSample(lastAnalysis.source)) {
+    analyze(new FormData(), null, { sample: lastSampleParam });
+    return;
+  }
+  if (uploadedFile) {
+    const formData = new FormData();
+    formData.append("file", uploadedFile);
+    analyze(formData, uploadedFile.name);
+  }
+}
+
 let debounceTimer;
 $("tariff").addEventListener("input", () => {
   if ($("results").classList.contains("hidden")) return;
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => {
-    if (lastAnalysis && isBundledSample(lastAnalysis.source)) {
-      analyze(new FormData(), null, { sample: lastSampleParam });
-    }
-    // For uploads we keep the previous result until a new file is chosen,
-    // because browsers cannot re-read a File input after it is cleared.
-  }, 450);
+  debounceTimer = setTimeout(rerunWithCurrentSource, 450);
 });
+
+$("settings-toggle").addEventListener("click", () => {
+  const open = !$("settings-body").classList.toggle("hidden");
+  $("settings-toggle").textContent = open ? "⚙ Скрыть параметры" : "⚙ Показать параметры";
+  $("settings-toggle").setAttribute("aria-expanded", String(open));
+});
+
+$("settings-apply").addEventListener("click", rerunWithCurrentSource);
 
 /* ---------- Tabs ---------- */
 function showTab(name) {
@@ -983,11 +1394,7 @@ $("multiplier-slider").addEventListener("input", () => {
   clearTimeout(multiplierDebounce);
   multiplierDebounce = setTimeout(() => {
     currentMultiplier = value;
-    // Same limitation as the tariff input: an uploaded File input can't be
-    // re-read once cleared, so only the bundled sample recalculates live.
-    if (lastAnalysis && isBundledSample(lastAnalysis.source)) {
-      analyze(new FormData(), null, { sample: lastSampleParam });
-    }
+    rerunWithCurrentSource();
   }, 300);
 });
 
@@ -1046,12 +1453,10 @@ function buildReportHtml() {
 </body></html>`;
 }
 
-$("download-btn").addEventListener("click", () => {
-  const html = buildReportHtml();
-  if (!html) return;
+function openPrintWindow(html) {
   const win = window.open("", "_blank");
   if (!win) {
-    showStatus("Не удалось открыть окно отчёта — разрешите всплывающие окна для этого сайта.", true);
+    showStatus("Не удалось открыть окно — разрешите всплывающие окна для этого сайта.", true);
     setTimeout(hideStatus, 6000);
     return;
   }
@@ -1059,7 +1464,72 @@ $("download-btn").addEventListener("click", () => {
   win.document.close();
   win.focus();
   win.print();
-});
+}
+
+$("download-btn").addEventListener("click", () => openPrintWindow(buildReportHtml()));
+
+/* ---------- "Служебная записка" — a ready-to-print official memo draft ---------- */
+function buildMemoHtml() {
+  if (!lastAnalysis) return "";
+  const { summary: s, source } = lastAnalysis;
+  const today = new Date().toLocaleDateString("ru-RU");
+  const top = computeTopPriorityAction(lastAnalysis);
+  const findings = [
+    `За период анализа (${s.days_analyzed} дн.) зафиксировано ${s.anomaly_days} нерабочий(их) день(дней), в которые потребление энергии соответствовало занятому зданию.`,
+    `Суммарный избыточный расход составил ${fmt(s.total_excess_kwh, 1)} кВт·ч, что эквивалентно ${fmt(s.savings_kzt)} тенге.`,
+    s.baseline_reliable
+      ? "Базовый уровень потребления подтверждён достаточным объёмом данных по нерабочим дням."
+      : `Базовый уровень построен по ${s.off_day_samples} нерабочему(им) дню(дням) — предварительный сигнал, рекомендуется уточнить на более длинной истории.`,
+  ];
+  if (top) {
+    findings.push(`Наиболее вероятная причина по расчёту: «${top.hypothesis.split(" — ")[0]}» (${fmt(top.sharePct, 0)}% посчитанного перерасхода).`);
+  }
+  const recommendation = top
+    ? actionForHypothesis(top.hypothesis)
+    : "Проверить расписание инженерных систем на нерабочие дни.";
+
+  return `<!doctype html>
+<html lang="ru"><head><meta charset="utf-8" />
+<title>Служебная записка — ${source}</title>
+<style>
+  body { font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; padding: 36px; max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 17px; text-align: center; text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 4px; }
+  .subtitle { text-align: center; color: #555; font-size: 12.5px; margin-bottom: 28px; }
+  .field { margin-bottom: 14px; }
+  .field .k { font-weight: 700; }
+  ol { padding-left: 20px; }
+  li { margin-bottom: 8px; }
+  .sign { margin-top: 56px; display: flex; justify-content: space-between; }
+  .sign .line { border-top: 1px solid #111; width: 220px; padding-top: 4px; font-size: 12px; color: #555; }
+  @media print { body { padding: 0; } }
+</style></head>
+<body>
+  <h1>Служебная записка</h1>
+  <p class="subtitle">по результатам автоматического анализа энергопотребления · EcoBiz Copilot</p>
+  <div class="field"><span class="k">Дата:</span> ${today}</div>
+  <div class="field"><span class="k">Объект / источник данных:</span> ${source}</div>
+  <div class="field"><span class="k">Кому:</span> _______________________________</div>
+  <div class="field"><span class="k">От кого:</span> _______________________________</div>
+
+  <p class="field k">Установлено:</p>
+  <ol>${findings.map((f) => `<li>${f}</li>`).join("")}</ol>
+
+  <p class="field k">Рекомендуется:</p>
+  <ol><li>${recommendation}</li><li>Повторно проверить показатели после внесения изменений в расписание инженерных систем.</li></ol>
+
+  <p class="muted" style="font-size:11.5px; color:#777; margin-top:20px">
+    Цифры рассчитаны автоматически (25-й перцентиль потребления в нерабочие дни × порог ${fmt(s.multiplier, 1)});
+    методика и источники констант — см. вкладку «О методе» дашборда EcoBiz Copilot.
+  </p>
+
+  <div class="sign">
+    <div class="line">Подпись, расшифровка</div>
+    <div class="line">Дата</div>
+  </div>
+</body></html>`;
+}
+
+$("download-memo-btn").addEventListener("click", () => openPrintWindow(buildMemoHtml()));
 
 /* ---------- Telegram link + provenance table (fetched once, not per-analysis) ---------- */
 async function loadTelegramLink() {
@@ -1100,6 +1570,288 @@ async function loadProvenanceTable() {
     $("provenance-table").innerHTML = '<p class="muted">Не удалось загрузить источники — backend недоступен.</p>';
   }
 }
+
+/* ---------- Portfolio: compare multiple buildings ---------- */
+// Kept only in this tab's JS memory, per session — nothing is persisted or
+// sent anywhere beyond the existing /api/analyze calls, one per object.
+let portfolio = []; // { id, name, result }
+let portfolioSeq = 0;
+
+async function analyzeForPortfolio(formData, extraParams = {}) {
+  const params = new URLSearchParams({
+    tariff: $("tariff").value,
+    weather_adjust: "true",
+    ...currentSettingsParams(),
+    ...extraParams,
+  });
+  const res = await apiPost(`/api/analyze?${params.toString()}`, {
+    method: "POST",
+    body: formData,
+    signal: reqTimeout(30000),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data) throw new Error(data?.detail || `Ошибка запроса (${res.status})`);
+  return data;
+}
+
+async function addToPortfolio(entries) {
+  $("portfolio-loading").classList.remove("hidden");
+  for (const entry of entries) {
+    try {
+      const data = await analyzeForPortfolio(entry.formData, entry.extraParams || {});
+      portfolio.push({ id: ++portfolioSeq, name: entry.label || data.source, result: data });
+    } catch (err) {
+      showStatus(`Не удалось добавить «${entry.label}» в портфель — ${err.message}`, true);
+      setTimeout(hideStatus, 6000);
+    }
+  }
+  $("portfolio-loading").classList.add("hidden");
+  renderPortfolio();
+}
+
+function renderPortfolio() {
+  const empty = $("portfolio-empty");
+  const table = $("portfolio-table");
+  const summaryEl = $("portfolio-summary");
+  if (!portfolio.length) {
+    empty.classList.remove("hidden");
+    table.classList.add("hidden");
+    summaryEl.classList.add("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  table.classList.remove("hidden");
+
+  const sorted = [...portfolio].sort((a, b) => b.result.summary.savings_kzt - a.result.summary.savings_kzt);
+  const total = sorted.reduce((acc, p) => acc + p.result.summary.savings_kzt, 0);
+  let cumBefore = 0;
+  const rows = sorted.map((p, i) => {
+    const s = p.result.summary;
+    // "Top priority" = still inside the leading 80% of total losses before
+    // this row is added — the handful of objects worth visiting first.
+    const isTop = total > 0 && cumBefore / total < 0.8;
+    cumBefore += s.savings_kzt;
+    return { p, s, i, isTop };
+  });
+  const topCount = rows.filter((r) => r.isTop).length;
+  const topShare = total > 0 ? (rows.filter((r) => r.isTop).reduce((a, r) => a + r.s.savings_kzt, 0) / total) * 100 : 0;
+
+  table.querySelector("tbody").innerHTML = rows
+    .map(
+      ({ p, s, i, isTop }) =>
+        `<tr class="${isTop ? "top-priority" : ""}">` +
+        `<td><span class="rank-badge">${i + 1}</span></td>` +
+        `<td>${p.name}</td>` +
+        `<td class="num">${fmt(s.total_excess_kwh, 1)}</td>` +
+        `<td class="num">${fmt(s.savings_kzt)}</td>` +
+        `<td class="num">${s.anomaly_days} / ${s.days_analyzed}</td>` +
+        `<td><span class="reliability-chip ${s.baseline_reliable ? "yes" : "no"}">${s.baseline_reliable ? "да" : "мало данных"}</span></td>` +
+        `<td><button class="remove-btn" data-id="${p.id}" type="button" title="Убрать из портфеля">✕</button></td>` +
+        `</tr>`,
+    )
+    .join("");
+
+  summaryEl.textContent =
+    `${sorted.length} объект(ов) в портфеле · суммарные потери ${fmt(total)} тенге · ` +
+    `топ-${topCount} объект(ов) (отмечены слева) дают ${fmt(topShare, 0)}% от общей суммы потерь — приоритет для выезда.`;
+  summaryEl.classList.remove("hidden");
+
+  table.querySelectorAll(".remove-btn").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      portfolio = portfolio.filter((p) => p.id !== Number(btn.dataset.id));
+      renderPortfolio();
+    }),
+  );
+}
+
+$("portfolio-add-btn").addEventListener("click", () => $("portfolio-file-input").click());
+
+$("portfolio-file-input").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  if (!files.length) return;
+  const entries = files.map((file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return { formData: fd, label: file.name };
+  });
+  await addToPortfolio(entries);
+});
+
+$("portfolio-add-demo").addEventListener("click", async () => {
+  await addToPortfolio([
+    { formData: new FormData(), label: "sample_data.csv (демо)" },
+    { formData: new FormData(), label: "sample_data_multi.csv (демо)", extraParams: { sample: "multi" } },
+  ]);
+});
+
+/* ---------- OCR receipt photo input (Tesseract.js, loaded lazily from a CDN) ----------
+   Client-side only: the image never leaves the browser for OCR. Extracted
+   date/amount are a draft the user reviews before adding — OCR on a photo
+   is never trusted blindly. The accumulated history is analyzed by building
+   an ordinary CSV in memory and running it through the exact same
+   /api/analyze path as a file upload — no separate backend logic. */
+let tesseractLoadPromise = null;
+let ocrLastRawText = "";
+let ocrHistory = []; // { id, date, kwh }
+let ocrHistorySeq = 0;
+
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  if (tesseractLoadPromise) return tesseractLoadPromise;
+  tesseractLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Не удалось загрузить библиотеку распознавания текста — проверьте интернет-соединение."));
+    document.head.appendChild(script);
+  });
+  return tesseractLoadPromise;
+}
+
+// Heuristic, not a real receipt parser: first date-shaped substring, and
+// either a number next to "квт"/"kwh"/"итого"/"к оплате" or, failing that,
+// the largest plausible number on the page. Always shown as editable
+// fields — never fed into analysis without the user reviewing it.
+function parseReceiptText(text) {
+  let date = null;
+  const dateMatch = text.match(/(\d{2})[.\-/](\d{2})[.\-/](\d{4})/) || text.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (dateMatch) {
+    if (dateMatch[0].includes("-") && dateMatch[1].length === 4) {
+      date = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+    } else {
+      date = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+    }
+  }
+
+  let kwh = null;
+  const lines = text.split("\n");
+  const numRe = /(\d[\d\s]*[.,]?\d*)/;
+  for (const line of lines) {
+    if (/квт|kwh|потребл|итого|к\s*оплате/i.test(line)) {
+      const m = line.match(numRe);
+      if (m) {
+        const n = parseFloat(m[1].replace(/\s/g, "").replace(",", "."));
+        if (!Number.isNaN(n) && n > 0) {
+          kwh = n;
+          break;
+        }
+      }
+    }
+  }
+  if (kwh == null) {
+    const allNums = [...text.matchAll(/\d[\d\s]{0,6}[.,]?\d*/g)]
+      .map((m) => parseFloat(m[0].replace(/\s/g, "").replace(",", ".")))
+      .filter((n) => !Number.isNaN(n) && n > 0 && n < 1000000);
+    if (allNums.length) kwh = Math.max(...allNums);
+  }
+  return { date, kwh };
+}
+
+$("ocr-file-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $("ocr-error").classList.add("hidden");
+  $("ocr-result").classList.add("hidden");
+  $("ocr-progress").classList.remove("hidden");
+  $("ocr-progress-text").textContent = "Загружаем модель распознавания…";
+  try {
+    await loadTesseract();
+    $("ocr-progress-text").textContent = "Распознаём текст на фото…";
+    const { data } = await window.Tesseract.recognize(file, "rus+eng", {
+      logger: (m) => {
+        if (m.status === "recognizing text") {
+          $("ocr-progress-text").textContent = `Распознаём текст на фото… ${Math.round((m.progress || 0) * 100)}%`;
+        }
+      },
+    });
+    ocrLastRawText = data.text || "";
+    const { date, kwh } = parseReceiptText(ocrLastRawText);
+    $("ocr-date").value = date || "";
+    $("ocr-kwh").value = kwh != null ? kwh : "";
+    $("ocr-raw-text").textContent = ocrLastRawText.trim() || "(текст не распознан)";
+    $("ocr-result").classList.remove("hidden");
+  } catch (err) {
+    $("ocr-error").textContent = `Не удалось распознать фото — ${err.message}. Можно ввести дату и потребление вручную ниже, если распознавание недоступно.`;
+    $("ocr-error").classList.remove("hidden");
+    $("ocr-date").value = "";
+    $("ocr-kwh").value = "";
+    $("ocr-raw-text").textContent = "";
+    $("ocr-result").classList.remove("hidden"); // still let the user type values in manually
+  } finally {
+    $("ocr-progress").classList.add("hidden");
+    e.target.value = "";
+  }
+});
+
+function renderOcrHistory() {
+  const empty = $("ocr-history-empty");
+  const table = $("ocr-history-table");
+  const analyzeBtn = $("ocr-analyze-btn");
+  if (!ocrHistory.length) {
+    empty.classList.remove("hidden");
+    table.classList.add("hidden");
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = "Проанализировать историю";
+    return;
+  }
+  empty.classList.add("hidden");
+  table.classList.remove("hidden");
+  analyzeBtn.disabled = false;
+  analyzeBtn.textContent = `Проанализировать историю (${ocrHistory.length})`;
+
+  const sorted = [...ocrHistory].sort((a, b) => a.date.localeCompare(b.date));
+  table.querySelector("tbody").innerHTML = sorted
+    .map(
+      (r) =>
+        `<tr><td>${r.date}</td><td class="num">${fmt(r.kwh, 2)}</td>` +
+        `<td><button class="remove-btn" data-id="${r.id}" type="button" title="Убрать запись">✕</button></td></tr>`,
+    )
+    .join("");
+  table.querySelectorAll(".remove-btn").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      ocrHistory = ocrHistory.filter((r) => r.id !== Number(btn.dataset.id));
+      renderOcrHistory();
+    }),
+  );
+}
+
+$("ocr-add-btn").addEventListener("click", () => {
+  const date = $("ocr-date").value;
+  const kwh = parseFloat($("ocr-kwh").value);
+  if (!date) {
+    showStatus("Укажите дату записи перед добавлением.", true);
+    setTimeout(hideStatus, 4000);
+    return;
+  }
+  if (Number.isNaN(kwh) || kwh < 0) {
+    showStatus("Укажите корректное значение потребления (кВт·ч).", true);
+    setTimeout(hideStatus, 4000);
+    return;
+  }
+  ocrHistory = ocrHistory.filter((r) => r.date !== date); // one record per date, latest edit wins
+  ocrHistory.push({ id: ++ocrHistorySeq, date, kwh });
+  renderOcrHistory();
+  // Clear the fields but keep the form open — manual entry (no photo, e.g.
+  // when OCR/the CDN is unreachable) needs to add several days in a row
+  // without re-selecting a file just to see the inputs again.
+  $("ocr-date").value = "";
+  $("ocr-kwh").value = "";
+});
+
+$("ocr-analyze-btn").addEventListener("click", () => {
+  if (!ocrHistory.length) return;
+  const rows = ["date,consumption_kwh"];
+  for (const r of [...ocrHistory].sort((a, b) => a.date.localeCompare(b.date))) {
+    rows.push(`${r.date},${r.kwh}`);
+  }
+  const csvBlob = new Blob([rows.join("\n")], { type: "text/csv" });
+  const file = new File([csvBlob], "квитанции-ocr.csv", { type: "text/csv" });
+  uploadedFile = file;
+  const formData = new FormData();
+  formData.append("file", file);
+  analyze(formData, file.name);
+});
 
 loadTelegramLink();
 loadProvenanceTable();

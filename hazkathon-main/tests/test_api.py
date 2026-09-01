@@ -228,6 +228,94 @@ def test_config_endpoint_exposes_bot_username_not_token(client, monkeypatch):
     assert "token" not in str(body).lower()
 
 
+def test_analyze_includes_bootstrap_savings_range(client):
+    body = client.post("/api/analyze").json()
+    s = body["summary"]
+    assert s["savings_kzt_p10"] is not None
+    assert s["savings_kzt_p10"] <= s["savings_kzt"] <= s["savings_kzt_p90"]
+    elec = body["resources"]["electricity"]
+    assert elec["savings_kzt_p10"] == s["savings_kzt_p10"]
+    assert elec["savings_kzt_p90"] == s["savings_kzt_p90"]
+
+
+def test_analyze_bootstrap_range_absent_under_weather_adjustment(client, monkeypatch):
+    """The bootstrap resamples the flat baseline — under weather adjustment the
+    point estimate comes from a regression instead, so the range would not
+    describe the same number and must be omitted rather than shown mismatched."""
+    import backend.main as backend_main
+
+    monkeypatch.setattr(
+        backend_main,
+        "detect_anomalies_weather_adjusted",
+        lambda df, hdd_by_date, multiplier=1.5: backend_main.detect_anomalies(df, multiplier=multiplier),
+    )
+    monkeypatch.setattr(backend_main.weather, "fetch_daily_mean_temperatures", lambda *a, **k: {"2025-12-01": -5.0})
+    res = client.post("/api/analyze", params={"weather_adjust": True})
+    body = res.json()
+    assert body["weather_adjusted"] is True
+    assert body["summary"]["savings_kzt_p10"] is None
+    assert body["summary"]["savings_kzt_p90"] is None
+
+
+def test_analyze_norm_comparison_only_when_supplied(client):
+    without = client.post("/api/analyze").json()
+    assert without["norm_comparison"] is None
+
+    with_norm = client.post("/api/analyze", params={"official_norm_kwh_per_day": 200}).json()
+    nc = with_norm["norm_comparison"]
+    assert nc is not None
+    assert nc["official_norm_kwh_per_day"] == 200
+    assert nc["actual_avg_kwh_per_day"] > 0
+
+
+def test_analyze_efficiency_grade_only_when_area_supplied(client):
+    without = client.post("/api/analyze").json()
+    assert without["efficiency_grade"] is None
+
+    with_area = client.post("/api/analyze", params={"building_area_m2": 1000}).json()
+    grade = with_area["efficiency_grade"]
+    assert grade is not None
+    assert grade["grade"] in ("A", "B", "C", "D", "E", "F")
+
+
+def test_analyze_co2_and_resource_overrides_apply(client):
+    body = client.post(
+        "/api/analyze",
+        params={"sample": "multi", "co2_factor": 1.0, "water_tariff": 200, "heat_tariff": 7000, "heat_co2_factor": 180},
+    ).json()
+    assert body["summary"]["co2_factor"] == 1.0
+    assert body["resources"]["water"]["tariff_kzt_per_unit"] == 200
+    assert body["resources"]["water"]["co2_saved_kg"] is None  # water never gets a CO2 factor, override or not
+    assert body["resources"]["heat"]["tariff_kzt_per_unit"] == 7000
+
+
+def test_analyze_rejects_negative_overrides(client):
+    for param in ("co2_factor", "water_tariff", "heat_tariff", "heat_co2_factor", "official_norm_kwh_per_day", "building_area_m2"):
+        res = client.post("/api/analyze", params={param: -1})
+        assert res.status_code == 422, param
+
+
+def test_insight_brief_mode_is_short_and_offline_by_default(client, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    analysis = client.post("/api/analyze").json()
+    res = client.post(
+        "/api/insight",
+        params={"brief": True},
+        json={
+            "source": analysis["source"],
+            "summary": analysis["summary"],
+            "anomalies": [d for d in analysis["series"] if d["is_anomaly"]],
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["model"] == "offline-fallback"
+    # A brief executive justification should be much shorter than the full
+    # four-section Markdown action plan, and contain no Markdown headings.
+    assert "##" not in body["insight"]
+    assert len(body["insight"]) < 800
+
+
 def test_insight_falls_back_offline_without_api_key(client, monkeypatch):
     """No GEMINI_API_KEY in this test environment: the demo must still return
     a usable recommendation instead of a 503, built from the verified numbers."""

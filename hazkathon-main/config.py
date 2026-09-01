@@ -7,7 +7,7 @@ traceable to a real source instead of an "eyeballed" number.
 
 from dataclasses import dataclass
 
-from core import BASELINE_MULTIPLIER
+from core import BASELINE_MULTIPLIER, KZ_AVERAGE_INTENSITY_KWH_PER_M2_YEAR
 
 # Real household tariff for the Abai region (bytovoy/household tariff), cited in
 # the project brief. This is the default used by core.py. It is NOT verified for
@@ -145,9 +145,18 @@ PROVENANCE: dict[str, Provenance] = {
     "official_norm_kwh_per_day": Provenance(
         None,
         "estimate",
-        "TODO: не заполнено. Постановление Правительства РК №1118 задаёт официальные "
-        "нормативы потребления для бюджетных организаций по регионам и этажности — "
-        "нужна конкретная цифра для анализируемого здания, прежде чем сравнение "
-        "'факт vs норматив' появится в отчёте.",
+        "Не заполнено централизованно — не выдумываем цифру. Постановление "
+        "Правительства РК №1118 задаёт официальные нормативы потребления для "
+        "бюджетных организаций по регионам и этажности, но она зависит от "
+        "конкретного здания. Вместо догадки поле редактируемое: впишите "
+        "подтверждённый норматив своего объекта прямо в интерфейсе (панель "
+        "«Параметры расчёта»), и сравнение 'факт vs норматив' появится в отчёте.",
+    ),
+    "energy_grade_kz_average_kwh_per_m2_year": Provenance(
+        KZ_AVERAGE_INTENSITY_KWH_PER_M2_YEAR,
+        "estimate",
+        "Средняя интенсивность потребления по Казахстану (кВт·ч/м²/год) — "
+        "справочная величина из брифа проекта для калибровки букв-класса A-F, "
+        "не независимо перепроверенный официальный источник.",
     ),
 }

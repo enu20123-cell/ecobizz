@@ -8,11 +8,13 @@ import pandas as pd
 from core import (
     BASELINE_MULTIPLIER,
     MIN_OFF_DAY_SAMPLES,
+    bootstrap_savings_range,
     calculate_impact,
     classify_anomaly_shapes,
     detect_anomalies,
     detect_anomalies_weather_adjusted,
     diagnose_anomaly_day,
+    energy_efficiency_grade,
     get_baseline,
     load_data,
 )
@@ -257,3 +259,61 @@ def test_classify_anomaly_shapes_one_off():
     flags = [False, False, True, False, False]
     shapes = classify_anomaly_shapes(pd.DataFrame({"date": dates, "is_anomaly": flags}))
     assert shapes[dates[2].strftime("%Y-%m-%d")] == "разовая"
+
+
+def test_bootstrap_savings_range_brackets_the_point_estimate(sample_df):
+    flagged = detect_anomalies(sample_df)
+    point = calculate_impact(flagged, tariff=17.447)["savings_kzt"]
+    bootstrap = bootstrap_savings_range(sample_df, tariff=17.447)
+    assert bootstrap is not None
+    assert bootstrap["p10"] <= bootstrap["p50"] <= bootstrap["p90"]
+    # The point estimate uses the *actual* off-day sample as its own baseline
+    # (not a resample), so it should sit close to the bootstrap median, not
+    # necessarily land exactly on it.
+    assert bootstrap["p10"] * 0.5 <= point <= bootstrap["p90"] * 1.5
+
+
+def test_bootstrap_savings_range_is_deterministic_for_the_same_data(sample_df):
+    a = bootstrap_savings_range(sample_df, tariff=17.447)
+    b = bootstrap_savings_range(sample_df, tariff=17.447)
+    assert a == b  # fixed seed — a live demo re-running the same file must not show a different range
+
+
+def test_bootstrap_savings_range_none_with_too_few_off_days():
+    df = pd.DataFrame(
+        {
+            "date": pd.date_range("2026-01-01", periods=3),
+            "consumption_kwh": [100.0, 110.0, 120.0],
+            "is_workday": [0, 0, 0],
+        }
+    )
+    assert bootstrap_savings_range(df, tariff=17.447) is None
+
+
+def test_bootstrap_savings_range_scales_with_tariff(sample_df):
+    low = bootstrap_savings_range(sample_df, tariff=10)
+    high = bootstrap_savings_range(sample_df, tariff=100)
+    assert high["p50"] == pytest.approx(low["p50"] * 10)
+
+
+def test_energy_efficiency_grade_none_without_area(sample_df):
+    flagged = detect_anomalies(sample_df)
+    total = float(flagged["consumption_kwh"].sum())
+    assert energy_efficiency_grade(total, len(flagged), None) is None
+    assert energy_efficiency_grade(total, len(flagged), 0) is None
+
+
+def test_energy_efficiency_grade_letter_bands():
+    # A tiny, very efficient building (low annual kWh/m2) should grade A;
+    # a huge consumer relative to its floor area should fall through to F.
+    efficient = energy_efficiency_grade(total_consumption=1000.0, days_analyzed=30, area_m2=5000.0)
+    inefficient = energy_efficiency_grade(total_consumption=100000.0, days_analyzed=30, area_m2=100.0)
+    assert efficient["grade"] == "A"
+    assert inefficient["grade"] == "F"
+    assert efficient["ratio_to_average"] < inefficient["ratio_to_average"]
+
+
+def test_energy_efficiency_grade_intensity_math():
+    # 27000 kWh over 30 days -> 328500 kWh/year annualized, / 1000 m2 = 328.5 kWh/m2/year.
+    result = energy_efficiency_grade(total_consumption=27000.0, days_analyzed=30, area_m2=1000.0)
+    assert result["intensity_kwh_per_m2_year"] == pytest.approx(328.5, rel=1e-3)

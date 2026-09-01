@@ -111,6 +111,20 @@ body {
 }
 .btn.telegram:hover { background: #2bacea; }
 
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  background: rgba(52, 211, 153, 0.08);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: help;
+}
+
 /* ---------- Layout ---------- */
 main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
 .hidden { display: none !important; }
@@ -213,6 +227,108 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
   color: var(--muted);
   font-weight: 500;
 }
+
+/* ---------- Settings panel (editable "estimate" constants) ---------- */
+.settings-panel { margin-bottom: 14px; }
+.settings-body { margin-top: 4px; }
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 18px;
+  margin: 12px 0 16px;
+}
+.settings-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.settings-label-row { display: inline-flex; align-items: center; gap: 6px; }
+.settings-grid input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.settings-grid input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 4px;
+}
+.tag.estimate { background: rgba(255, 194, 75, 0.16); color: var(--amber); }
+.tag.missing { background: var(--surface-2); color: var(--muted); border: 1px dashed var(--border); }
+
+/* ---------- Norm comparison / efficiency grade ---------- */
+.compare-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.compare-row .card { margin-bottom: 0; }
+.norm-line, .grade-line { display: flex; align-items: baseline; gap: 8px; font-size: 14px; margin: 6px 0; }
+.norm-line strong, .grade-line strong { font-size: 20px; }
+.grade-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  font-size: 26px;
+  font-weight: 800;
+  margin-right: 12px;
+}
+.grade-badge.A, .grade-badge.B { background: rgba(52, 211, 153, 0.18); color: var(--accent); }
+.grade-badge.C { background: rgba(255, 194, 75, 0.18); color: var(--amber); }
+.grade-badge.D, .grade-badge.E, .grade-badge.F { background: rgba(255, 107, 107, 0.18); color: var(--red); }
+.grade-row { display: flex; align-items: center; }
+
+/* ---------- Live loss counter ---------- */
+.accent-card { border-color: rgba(255, 107, 107, 0.35); }
+.live-counter-value {
+  font-size: 42px;
+  font-weight: 800;
+  color: var(--red);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.live-counter-value::after { content: " ₸"; font-size: 22px; color: var(--muted); }
+
+/* ---------- Period-over-period ---------- */
+.period-row { display: flex; align-items: center; gap: 10px; font-size: 14px; margin: 5px 0; }
+.period-delta.better { color: var(--accent); font-weight: 700; }
+.period-delta.worse { color: var(--red); font-weight: 700; }
+
+/* ---------- Savings confidence range ---------- */
+.kpi-range { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+/* ---------- Portfolio table ---------- */
+#portfolio-table tr.top-priority td:first-child { border-left: 3px solid var(--red); }
+#portfolio-table .rank-badge {
+  display: inline-block;
+  min-width: 20px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--muted);
+}
+#portfolio-table tr.top-priority .rank-badge { color: var(--red); }
+#portfolio-table .remove-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 15px;
+  padding: 2px 6px;
+}
+#portfolio-table .remove-btn:hover { color: var(--red); }
+.reliability-chip { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; }
+.reliability-chip.yes { background: rgba(52, 211, 153, 0.14); color: var(--accent); }
+.reliability-chip.no { background: rgba(255, 194, 75, 0.16); color: var(--amber); }
 
 /* ---------- Resource switcher ---------- */
 .resource-switcher { margin-bottom: 16px; }
