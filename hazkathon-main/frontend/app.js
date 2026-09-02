@@ -255,6 +255,7 @@ function render(data) {
   renderNormComparison(data);
   renderEfficiencyGrade(data);
   renderForecast(data);
+  renderSimulator();
   buildResourceSwitcher(data);
   const keys = Object.keys(data.resources || {});
   renderResourceView(keys.includes("electricity") ? "electricity" : keys[0]);
@@ -666,6 +667,55 @@ function renderForecast(data) {
       );
     })
     .join("");
+}
+
+// Honesty rule (matches the rest of the app): only "fixed" is grounded in
+// measured data — it directly scales the already-detected excess/savings.
+// "sensors" is an explicit what-if assumption (labeled "оценка" in the
+// markup), applied to whatever the fixed-% lever left unaddressed, so the
+// two levers can never claim more than 100% of the detected waste. Pure
+// client-side arithmetic on lastAnalysis — no network call, no new model.
+function simulatorScenario() {
+  if (!lastAnalysis) return null;
+  const s = lastAnalysis.summary;
+  const fixedPct = Number($("sim-fixed").value);
+  const sensorsPct = Number($("sim-sensors").value);
+  const remainingAfterFixed = 100 - fixedPct;
+  const totalAddressedPct = Math.min(100, fixedPct + (remainingAfterFixed * sensorsPct) / 100);
+
+  const tariff = Number($("tariff").value) || s.tariff_kzt_per_kwh;
+  const beforeExcessKwh = s.total_excess_kwh;
+  const afterExcessKwh = beforeExcessKwh * (1 - totalAddressedPct / 100);
+  const savedKwh = beforeExcessKwh - afterExcessKwh;
+  const savedKzt = savedKwh * tariff;
+
+  return { fixedPct, sensorsPct, totalAddressedPct, beforeExcessKwh, afterExcessKwh, savedKwh, savedKzt };
+}
+
+function recomputeSimulator() {
+  const scenario = simulatorScenario();
+  $("sim-fixed-value").textContent = `${$("sim-fixed").value}%`;
+  $("sim-sensors-value").textContent = `${$("sim-sensors").value}%`;
+  if (!scenario) return;
+
+  $("sim-result-pct").textContent = `${fmt(scenario.totalAddressedPct, 0)}%`;
+  $("sim-result-kzt").textContent = `${fmt(scenario.savedKzt)} тенге`;
+
+  const maxKwh = scenario.beforeExcessKwh || 1;
+  $("sim-bar-before").style.width = "100%";
+  $("sim-bar-after").style.width = `${Math.max(2, (scenario.afterExcessKwh / maxKwh) * 100)}%`;
+  $("sim-before-val").textContent = `${fmt(scenario.beforeExcessKwh, 1)} кВт·ч`;
+  $("sim-after-val").textContent = `${fmt(scenario.afterExcessKwh, 1)} кВт·ч`;
+}
+
+function renderSimulator() {
+  const card = $("simulator-card");
+  if (!lastAnalysis || lastAnalysis.summary.total_excess_kwh <= 0) {
+    card.classList.add("hidden");
+    return;
+  }
+  card.classList.remove("hidden");
+  recomputeSimulator();
 }
 
 function renderWeatherBadge(data) {
@@ -1462,9 +1512,13 @@ function rerunWithCurrentSource() {
 let debounceTimer;
 $("tariff").addEventListener("input", () => {
   if ($("results").classList.contains("hidden")) return;
+  recomputeSimulator(); // instant client-side feedback; the full re-analyze below is debounced
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(rerunWithCurrentSource, 450);
 });
+
+$("sim-fixed").addEventListener("input", recomputeSimulator);
+$("sim-sensors").addEventListener("input", recomputeSimulator);
 
 $("settings-toggle").addEventListener("click", () => {
   const open = !$("settings-body").classList.toggle("hidden");

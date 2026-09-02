@@ -206,6 +206,53 @@
           </article>
         </section>
 
+        <section id="simulator-card" class="card hidden">
+          <div class="card-head"><h2>Симулятор экономии</h2></div>
+          <p class="muted">
+            Не новая модель — пересчёт уже найденных цифр под разные сценарии. Первый рычаг —
+            измеренная величина (доля уже обнаруженного перерасхода); второй — явно помеченное
+            предположение, не измеренный факт.
+          </p>
+
+          <div class="sim-controls">
+            <label class="sim-slider">
+              <span class="sim-slider-row">
+                <span>Устранено обнаруженного перерасхода</span>
+                <strong id="sim-fixed-value">100%</strong>
+              </span>
+              <input id="sim-fixed" type="range" min="0" max="100" step="5" value="100" />
+            </label>
+            <label class="sim-slider">
+              <span class="sim-slider-row">
+                <span>Датчики присутствия <span class="tag estimate">оценка</span> — дополнительно ловят из оставшегося</span>
+                <strong id="sim-sensors-value">20%</strong>
+              </span>
+              <input id="sim-sensors" type="range" min="0" max="50" step="5" value="20" />
+            </label>
+          </div>
+
+          <div class="sim-result">
+            <div>
+              <div class="sim-result-pct" id="sim-result-pct">0%</div>
+              <div class="muted">экономии от текущих потерь этого периода</div>
+            </div>
+            <div class="sim-result-kzt" id="sim-result-kzt">0 тенге</div>
+          </div>
+
+          <div class="sim-bars">
+            <div class="sim-bar-row">
+              <span class="sim-bar-label">Было</span>
+              <div class="sim-bar-track"><div class="sim-bar sim-bar-before" id="sim-bar-before"></div></div>
+              <span class="sim-bar-val" id="sim-before-val"></span>
+            </div>
+            <div class="sim-bar-row">
+              <span class="sim-bar-label">Станет</span>
+              <div class="sim-bar-track"><div class="sim-bar sim-bar-after" id="sim-bar-after"></div></div>
+              <span class="sim-bar-val" id="sim-after-val"></span>
+            </div>
+          </div>
+        </section>
+
         <section class="card">
           <div class="card-head">
             <h2>Дневное потребление</h2>
