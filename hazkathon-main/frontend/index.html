@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0a0f0d" />
   <title>EcoBiz Copilot - детектор потерь энергии</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'><rect width='36' height='36' rx='9' fill='%230f382c'/><path d='M10 26 A12 12 0 0 1 26 10 A12 12 0 0 1 10 26 Z' fill='%2310b981'/></svg>" />
   <link rel="stylesheet" href="styles.css" />
   <script>
     // Applied before first paint so switching themes never causes a flash
@@ -26,7 +26,12 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo" aria-hidden="true">🌿</span>
+      <svg class="logo" viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+        <rect x="1" y="1" width="34" height="34" rx="10" fill="var(--accent-soft)" stroke="var(--accent-soft-border)"/>
+        <path d="M10 26 A12 12 0 0 1 26 10 A12 12 0 0 1 10 26 Z" fill="var(--accent)"/>
+        <path d="M10 26 L6.5 29.5" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+        <path d="M12 24 L24 12" stroke="var(--surface)" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
       <div>
         <h1>EcoBiz</h1>
         <p>Находит потери электроэнергии в дни, когда здание должно быть закрыто</p>
