@@ -770,7 +770,62 @@ td.excess { color: var(--red); font-weight: 650; }
 .telegram-card h2 { font-size: 19px; margin-bottom: 6px; }
 .telegram-card p { color: var(--muted); font-size: 13.5px; max-width: 52ch; margin-bottom: 12px; }
 
+/* ---------- FAQ tab ---------- */
+.faq-hero { display: flex; align-items: center; gap: 18px; }
+.faq-hero .icon-badge {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: var(--accent-grad);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.faq-hero .icon-badge svg { width: 26px; height: 26px; color: var(--accent-ink); }
+.faq-hero h2 { font-size: 18px; margin-bottom: 4px; }
+
+.faq-list { display: flex; flex-direction: column; gap: 4px; }
+.faq-list details {
+  border-bottom: 1px solid var(--border);
+  padding: 11px 2px;
+}
+.faq-list details:last-child { border-bottom: none; }
+.faq-list summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.faq-list summary::-webkit-details-marker { display: none; }
+.faq-list summary::before {
+  content: "+";
+  color: var(--accent);
+  font-weight: 700;
+  width: 14px;
+  flex: none;
+  transition: transform 0.15s;
+}
+.faq-list details[open] summary::before { content: "\2212"; }
+.faq-list details p {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+  margin: 8px 0 2px 22px;
+}
+.faq-list details code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12.5px;
+}
+
 @media (max-width: 640px) {
+  .faq-hero { flex-direction: column; align-items: flex-start; }
   .topbar { padding: 14px 18px; }
   main { padding: 20px 14px 48px; }
   .brand p { display: none; }

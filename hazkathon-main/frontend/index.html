@@ -57,6 +57,7 @@
         <button class="tab-btn" data-tab="ocr" type="button" role="tab" aria-selected="false">Фото квитанции</button>
         <button class="tab-btn" data-tab="telegram" type="button" role="tab" aria-selected="false">Telegram</button>
         <button class="tab-btn" data-tab="method" type="button" role="tab" aria-selected="false">О методе</button>
+        <button class="tab-btn" data-tab="faq" type="button" role="tab" aria-selected="false">Вопросы</button>
       </nav>
 
       <section id="tab-overview" class="tab-panel" role="tabpanel">
@@ -395,6 +396,31 @@
             </ul>
           </div>
         </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Зачем отдельный канал, если есть сайт</h2></div>
+          <div class="method-text">
+            <p class="muted">
+              Завхоз или директор школы редко держит открытой вкладку с дашбордом — но Telegram
+              уже стоит на телефоне. Бот не дублирует логику: он вызывает тот же
+              <code>/api/analyze</code> и <code>/api/insight</code>, что и веб-дашборд
+              (см. <code>bot.py</code>), поэтому цифры гарантированно совпадают — это не вторая,
+              менее надёжная версия анализа, а тот же самый расчёт с другой точкой входа.
+            </p>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Частые вопросы о боте</h2></div>
+          <div class="faq-list">
+            <details><summary>Бот хранит присланные файлы?</summary>
+              <p>Нет — так же, как и веб-дашборд, файл обрабатывается только в памяти запроса к <code>/api/analyze</code> и никогда не пишется на диск (см. карточку «Без сохранения данных» на вкладке «О методе»).</p></details>
+            <details><summary>Что если backend не запущен?</summary>
+              <p>Бот честно ответит, что не может связаться с backend по адресу <code>BACKEND_URL</code>, вместо того чтобы притвориться, что анализ прошёл — см. <code>bot.py</code>.</p></details>
+            <details><summary>Токен бота нигде не «зашит» в код?</summary>
+              <p>Нет, только через переменную окружения <code>TELEGRAM_BOT_TOKEN</code> (см. <code>.env.example</code>) — в публичном репозитории его нет.</p></details>
+          </div>
+        </section>
       </section>
 
       <section id="tab-method" class="tab-panel hidden" role="tabpanel">
@@ -497,6 +523,74 @@
         <section class="card">
           <div class="card-head"><h2>Источники цифр</h2></div>
           <div id="provenance-table" class="provenance-table"></div>
+        </section>
+      </section>
+
+      <section id="tab-faq" class="tab-panel hidden" role="tabpanel">
+        <section class="card faq-hero">
+          <div class="icon-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.9.4-1.4 1.2-1.4 2.2v.3"/><circle cx="12" cy="17.2" r=".2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="10"/></svg>
+          </div>
+          <div>
+            <h2>Вопросы и ответы</h2>
+            <p class="muted">Та же честная подготовка к защите, которую использует команда — просто вынесена в интерфейс, а не спрятана в README, чтобы жюри и любой, кто открыл демо, мог сверить ответ сам.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Данные и статистическое ядро</h2></div>
+          <div class="faq-list">
+            <details><summary>Почему 25-й перцентиль, а не среднее?</summary>
+              <p>Среднее может быть завышено теми же аномалиями, которые мы пытаемся найти; 25-й перцентиль остаётся ближе к корректно выключенному зданию.</p></details>
+            <details><summary>Почему порог ×1.5?</summary>
+              <p>Простой, объяснимый порог для MVP — потребление должно быть явно выше базового уровня, а не немного превышать его. Может стать настраиваемым параметром, когда накопится больше реальной истории для калибровки.</p></details>
+            <details><summary>Почему <code>baseline_reliable</code> может быть false?</summary>
+              <p>При 1-4 нерабочих днях нельзя честно утверждать норму. Код всё равно показывает предварительный сигнал, но не скрывает слабость данных.</p></details>
+            <details><summary>Что происходит, если <code>is_workday</code> отсутствует?</summary>
+              <p>Определяется по выходным плюс <code>holidays_kz.json</code> (государственные праздники Казахстана и типичные школьные каникулы, источник — gov.kz). Колонка, заданная вручную, всегда имеет приоритет.</p></details>
+            <details><summary>Почему погодная поправка — это регрессия, а не ещё один множитель?</summary>
+              <p>Множитель одинаково относится ко всем нерабочим дням; связь между температурой и отоплением не линейная константа, а линия — регрессия даёт для каждой температуры своё ожидание, множитель на это не способен.</p></details>
+            <details><summary>Что если данных для регрессии мало или Open-Meteo недоступен?</summary>
+              <p><code>detect_anomalies_weather_adjusted</code> возвращает <code>None</code>, и код откатывается на обычный плоский базовый уровень — тот же путь, что работал раньше; <code>weather_adjusted: false</code> в ответе честно об этом сообщает.</p></details>
+            <details><summary>Почему вода и тепло используют ту же функцию <code>detect_anomalies</code>, а не отдельный алгоритм?</summary>
+              <p>Потому что статистика не зависит от единицы измерения — 25-й перцентиль нерабочих дней и порог ×1.5 работают одинаково для кВт·ч, м³ и Гкал; <code>value_column</code> просто указывает, какую колонку читать.</p></details>
+            <details><summary>Диагностика причины — это ML?</summary>
+              <p>Нет, <code>diagnose_anomaly_day</code> — таблица правил if/else на пересечении <code>is_anomaly</code> по ресурсам одной даты; ничего не обучается и не предсказывает вероятность, только сравнивает булевы флаги.</p></details>
+            <details><summary>Как считается «уверенность» в причине?</summary>
+              <p><code>confirming_signals / available_signals</code> — отношение, которое можно проверить вручную по любому дню, а не выведенный откуда-то процент. Погодная поправка даёт электричеству дополнительный подтверждающий сигнал, потому что аномалия, пережившая поправку на холод, — более сильное доказательство реальной потери, чем непроверенная.</p></details>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Gemini и API</h2></div>
+          <div class="faq-list">
+            <details><summary>Зачем нужна LLM, если формула и так работает?</summary>
+              <p>Формула находит проблему; LLM переводит её в действие, понятное нетехническому человеку. Это отдельная функция, а не «чат ради чата».</p></details>
+            <details><summary>Как вы не даёте Gemini придумывать цифры?</summary>
+              <p>В промпт передаются только проверенные значения из расчёта, и те же цифры дублируются в ответе самим приложением — задача модели — изложение, а не арифметика.</p></details>
+            <details><summary>Что происходит без интернета?</summary>
+              <p><code>/api/insight</code> никогда не вернёт 503 по этой причине — он возвращает шаблонную рекомендацию, построенную на тех же проверенных цифрах.</p></details>
+            <details><summary>Почему CORS полностью открыт?</summary>
+              <p>Только для удобства локальной разработки; перед любым публичным развёртыванием разрешённый origin будет ограничен доменом приложения.</p></details>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Портфель, OCR и второй раунд</h2></div>
+          <div class="faq-list">
+            <details><summary>Диапазон P10/P50/P90 — это Monte Carlo или ML?</summary>
+              <p>Нет, обычный бутстрэп: ресэмплирование реальных нерабочих дней с повторением и пересчёт 25-го перцентиля на каждой выборке — статистика неопределённости самой оценки, а не симуляция и не модель.</p></details>
+            <details><summary>Откуда норматив в «факт vs норматив»?</summary>
+              <p>Не захардкожен — вписывается пользователем в панель «Параметры расчёта» на каждый конкретный объект; без него блок сравнения просто не появляется.</p></details>
+            <details><summary>Буква-класс A-F — это ML?</summary>
+              <p>Нет, пороговая таблица по отношению интенсивности объекта к среднему по РК; ничего не обучается, пороги можно проверить в <code>config.py</code>.</p></details>
+            <details><summary>Портфель объектов хранит данные между школами на сервере?</summary>
+              <p>Нет — каждый файл прогоняется через обычный <code>/api/analyze</code>, результат складывается только в JS-массив в этой вкладке браузера.</p></details>
+            <details><summary>OCR квитанции — это распознавание на сервере?</summary>
+              <p>Нет, Tesseract.js выполняется полностью в браузере пользователя; на сервер уходит только итоговый CSV, собранный из проверенных пользователем дата/показание.</p></details>
+            <details><summary>«Без сохранения данных» — это просто текст в интерфейсе?</summary>
+              <p>Нет, проверяемый факт: в <code>backend/main.py</code> и <code>core.py</code> нет ни одной операции записи загруженного файла на диск — файл существует только как байты в памяти на время одного запроса.</p></details>
+          </div>
         </section>
       </section>
     </section>
