@@ -1957,6 +1957,7 @@ function renderPortfolio() {
     empty.classList.remove("hidden");
     table.classList.add("hidden");
     summaryEl.classList.add("hidden");
+    $("portfolio-kpis").classList.add("hidden");
     return;
   }
   empty.classList.add("hidden");
@@ -1977,8 +1978,12 @@ function renderPortfolio() {
   const topShare = total > 0 ? (rows.filter((r) => r.isTop).reduce((a, r) => a + r.s.savings_kzt, 0) / total) * 100 : 0;
 
   table.querySelector("tbody").innerHTML = rows
-    .map(
-      ({ p, s, i, isTop }) =>
+    .map(({ p, s, i, isTop }) => {
+      const grade = p.result.efficiency_grade;
+      const gradeCell = grade
+        ? `<span class="grade-badge small ${grade.grade}" title="${fmt(grade.intensity_kwh_per_m2_year, 0)} кВт·ч/м²/год vs ${grade.benchmark_label}: ${fmt(grade.kz_average_kwh_per_m2_year, 0)}">${grade.grade}</span>`
+        : `<span class="muted">—</span>`;
+      return (
         `<tr class="${isTop ? "top-priority" : ""}">` +
         `<td><span class="rank-badge">${i + 1}</span></td>` +
         `<td>${p.name}</td>` +
@@ -1986,15 +1991,36 @@ function renderPortfolio() {
         `<td class="num">${fmt(s.savings_kzt)}</td>` +
         `<td class="num">${s.anomaly_days} / ${s.days_analyzed}</td>` +
         `<td><span class="reliability-chip ${s.baseline_reliable ? "yes" : "no"}">${s.baseline_reliable ? "да" : "мало данных"}</span></td>` +
+        `<td>${gradeCell}</td>` +
         `<td><button class="remove-btn" data-id="${p.id}" type="button" title="Убрать из портфеля">✕</button></td>` +
-        `</tr>`,
-    )
+        `</tr>`
+      );
+    })
     .join("");
 
   summaryEl.textContent =
     `${sorted.length} объект(ов) в портфеле · суммарные потери ${fmt(total)} тенге · ` +
     `топ-${topCount} объект(ов) (отмечены слева) дают ${fmt(topShare, 0)}% от общей суммы потерь — приоритет для выезда.`;
   summaryEl.classList.remove("hidden");
+
+  const reliableCount = sorted.filter((p) => p.result.summary.baseline_reliable).length;
+  const totalKwh = sorted.reduce((acc, p) => acc + p.result.summary.total_excess_kwh, 0);
+  const grades = sorted.map((p) => p.result.efficiency_grade).filter(Boolean);
+  const gradedShare = grades.length ? `${grades.length} из ${sorted.length}` : "—";
+  $("portfolio-kpis").innerHTML = [
+    { label: "Объектов в портфеле", value: sorted.length, unit: "", cls: "blue" },
+    { label: "Суммарные потери", value: fmt(totalKwh, 0), unit: "кВт·ч", cls: "red" },
+    { label: "Суммарные потери", value: fmt(total), unit: "тенге", cls: "amber" },
+    { label: "База надёжна", value: `${reliableCount}/${sorted.length}`, unit: "объектов", cls: "green" },
+    { label: "Класс энергоэффективности посчитан", value: gradedShare, unit: "объектов", cls: "purple" },
+  ]
+    .map(
+      (k) =>
+        `<article class="kpi ${k.cls}"><span class="kpi-label">${k.label}</span>` +
+        `<span class="kpi-value">${k.value}</span><span class="kpi-unit">${k.unit}</span></article>`,
+    )
+    .join("");
+  $("portfolio-kpis").classList.remove("hidden");
 
   table.querySelectorAll(".remove-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
@@ -2010,10 +2036,18 @@ $("portfolio-file-input").addEventListener("change", async (e) => {
   const files = [...e.target.files];
   e.target.value = "";
   if (!files.length) return;
+  // Optional, applies to this whole batch — matches the settings-panel
+  // convention of "field stays blank, that part of the result just doesn't
+  // appear" rather than forcing an answer.
+  const buildingType = $("portfolio-meta-type").value;
+  const area = $("portfolio-meta-area").value;
+  const metaParams = {};
+  if (buildingType) metaParams.building_type = buildingType;
+  if (area) metaParams.building_area_m2 = area;
   const entries = files.map((file) => {
     const fd = new FormData();
     fd.append("file", file);
-    return { formData: fd, label: file.name };
+    return { formData: fd, label: file.name, extraParams: metaParams };
   });
   await addToPortfolio(entries);
 });

@@ -114,6 +114,11 @@ class EfficiencyGrade(BaseModel):
     kz_average_kwh_per_m2_year: float
     ratio_to_average: float
     grade: str
+    # What kz_average_kwh_per_m2_year actually is: the national figure by
+    # default, or a specific config.BUILDING_TYPE_BENCHMARKS label when the
+    # caller supplied building_type — so the UI never has to guess which
+    # baseline a given ratio was computed against.
+    benchmark_label: str = "Казахстан (среднее)"
 
 
 class AnalyzeResponse(BaseModel):

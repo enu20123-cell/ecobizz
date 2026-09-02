@@ -276,6 +276,26 @@ def test_analyze_efficiency_grade_only_when_area_supplied(client):
     grade = with_area["efficiency_grade"]
     assert grade is not None
     assert grade["grade"] in ("A", "B", "C", "D", "E", "F")
+    assert grade["benchmark_label"] == "Казахстан (среднее)"
+
+
+def test_analyze_efficiency_grade_uses_building_type_benchmark(client):
+    national = client.post("/api/analyze", params={"building_area_m2": 1000}).json()["efficiency_grade"]
+    school = client.post(
+        "/api/analyze", params={"building_area_m2": 1000, "building_type": "school"}
+    ).json()["efficiency_grade"]
+
+    assert school["benchmark_label"] == "Школа/детсад"
+    # Same intensity, different benchmark -> the ratio (and possibly the
+    # letter) is computed against a different number, not just relabeled.
+    assert school["kz_average_kwh_per_m2_year"] != national["kz_average_kwh_per_m2_year"]
+    assert school["intensity_kwh_per_m2_year"] == national["intensity_kwh_per_m2_year"]
+
+
+def test_analyze_rejects_unknown_building_type(client):
+    res = client.post("/api/analyze", params={"building_area_m2": 1000, "building_type": "spaceship"})
+    assert res.status_code == 422
+    assert "spaceship" in res.json()["detail"]
 
 
 def test_analyze_co2_and_resource_overrides_apply(client):

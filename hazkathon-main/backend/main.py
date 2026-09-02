@@ -281,6 +281,7 @@ def _analyze(
     heat_co2_factor: float | None = None,
     official_norm_kwh_per_day: float | None = None,
     building_area_m2: float | None = None,
+    building_type: str | None = None,
 ) -> AnalyzeResponse:
     """Run the full pipeline and shape a JSON-friendly response.
 
@@ -380,13 +381,20 @@ def _analyze(
 
     efficiency_grade = None
     if building_area_m2:
-        grade = energy_efficiency_grade(
-            total_consumption=float(df["consumption_kwh"].sum()),
-            days_analyzed=int(len(df)),
-            area_m2=building_area_m2,
-        )
+        benchmark_meta = config.BUILDING_TYPE_BENCHMARKS.get(building_type)
+        grade_kwargs = {
+            "total_consumption": float(df["consumption_kwh"].sum()),
+            "days_analyzed": int(len(df)),
+            "area_m2": building_area_m2,
+        }
+        if benchmark_meta:
+            grade_kwargs["kz_average"] = benchmark_meta["kwh_per_m2_year"]
+        grade = energy_efficiency_grade(**grade_kwargs)
         if grade:
-            efficiency_grade = EfficiencyGrade(**grade)
+            efficiency_grade = EfficiencyGrade(
+                **grade,
+                benchmark_label=benchmark_meta["label"] if benchmark_meta else "Казахстан (среднее)",
+            )
 
     return AnalyzeResponse(
         summary=Summary(
@@ -432,7 +440,14 @@ async def analyze(
     heat_co2_factor: float | None = None,
     official_norm_kwh_per_day: float | None = None,
     building_area_m2: float | None = None,
+    building_type: str | None = None,
 ):
+    if building_type is not None and building_type not in config.BUILDING_TYPE_BENCHMARKS:
+        raise HTTPException(
+            422,
+            f"Неизвестный тип здания «{building_type}»; допустимые значения: "
+            f"{', '.join(sorted(config.BUILDING_TYPE_BENCHMARKS))}.",
+        )
     if tariff < 0:
         raise HTTPException(422, "Тариф не может быть отрицательным.")
     if multiplier <= 0:
@@ -472,6 +487,7 @@ async def analyze(
             heat_co2_factor=heat_co2_factor,
             official_norm_kwh_per_day=official_norm_kwh_per_day,
             building_area_m2=building_area_m2,
+            building_type=building_type,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

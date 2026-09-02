@@ -86,6 +86,29 @@ HEAT_CO2_FACTOR_TODO = (
 )
 
 # ---------------------------------------------------------------------------
+# Building-type benchmarks for the Portfolio tab's efficiency comparison.
+# core.energy_efficiency_grade() already takes a `kz_average` override
+# parameter (previously only ever called with the single national figure);
+# these give it a more specific baseline when the user tags a portfolio
+# entry with a building type. No official per-type Kazakhstan dataset was
+# found, so — same rule as everywhere else in this file — every entry is an
+# engineering estimate, not dressed up as a verified figure, and the
+# National average stays the honest fallback when no type is picked.
+# ---------------------------------------------------------------------------
+
+BUILDING_TYPE_BENCHMARKS = {
+    "school": {"label": "Школа/детсад", "kwh_per_m2_year": 180.0},
+    "office": {"label": "Офис", "kwh_per_m2_year": 220.0},
+    "retail": {"label": "Торговый объект", "kwh_per_m2_year": 320.0},
+    "warehouse": {"label": "Склад", "kwh_per_m2_year": 90.0},
+}
+BUILDING_TYPE_BENCHMARK_TODO = (
+    "All figures here are engineering estimates, not a verified per-type "
+    "Kazakhstan dataset — confirm against a real source (or the specific "
+    "building's own multi-year history) before presenting as fact."
+)
+
+# ---------------------------------------------------------------------------
 # Provenance registry — every numeric constant the app uses, tagged with
 # where it came from, structured (not just a code comment) so it can be
 # rendered programmatically on the "About method" screen and scanned by
@@ -159,4 +182,14 @@ PROVENANCE: dict[str, Provenance] = {
         "справочная величина из брифа проекта для калибровки букв-класса A-F, "
         "не независимо перепроверенный официальный источник.",
     ),
+    **{
+        f"energy_grade_benchmark_{key}": Provenance(
+            meta["kwh_per_m2_year"],
+            "estimate",
+            f"Инженерная оценка типичной интенсивности потребления для «{meta['label']}» "
+            "(кВт·ч/м²/год) — нет верифицированного датасета по типам зданий РК, "
+            "не выдаём за подтверждённый факт.",
+        )
+        for key, meta in BUILDING_TYPE_BENCHMARKS.items()
+    },
 }

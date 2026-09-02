@@ -398,7 +398,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
   color: var(--muted);
 }
 .settings-label-row { display: inline-flex; align-items: center; gap: 6px; }
-.settings-grid input {
+.settings-grid input, .settings-grid select {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -406,7 +406,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
   color: var(--text);
   font: inherit;
 }
-.settings-grid input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.settings-grid input:focus, .settings-grid select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .tag {
   display: inline-block;
   border-radius: 999px;
@@ -440,6 +440,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
 .grade-badge.C { background: var(--amber-soft); color: var(--amber); }
 .grade-badge.D, .grade-badge.E, .grade-badge.F { background: var(--red-soft); color: var(--red); }
 .grade-row { display: flex; align-items: center; }
+.grade-badge.small { width: 28px; height: 28px; border-radius: 7px; font-size: 14px; margin-right: 0; }
 
 /* ---------- Live loss counter ---------- */
 .accent-card { border-color: var(--red-soft-border); }

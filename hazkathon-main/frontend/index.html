@@ -378,9 +378,25 @@
             </div>
           </div>
           <p class="muted">Загрузите несколько файлов по разным школам/объектам (по одному или сразу пачкой) — здесь они сравниваются рядом, отсортированные по потенциальной экономии, чтобы решить, куда ехать в первую очередь. Ничего не сохраняется на сервере — только в памяти этой вкладки браузера.</p>
+
+          <div class="settings-grid" style="margin-top:14px">
+            <label><span class="settings-label-row">Тип здания <span class="tag missing">необязательно</span></span>
+              <select id="portfolio-meta-type">
+                <option value="">— не указан —</option>
+                <option value="school">Школа/детсад</option>
+                <option value="office">Офис</option>
+                <option value="retail">Торговый объект</option>
+                <option value="warehouse">Склад</option>
+              </select></label>
+            <label><span class="settings-label-row">Площадь объекта <span class="tag missing">необязательно</span></span>
+              <input id="portfolio-meta-area" type="number" step="1" min="0" placeholder="для класса A-F" /> <span class="unit">м²</span></label>
+          </div>
+          <p class="muted" style="margin-bottom:6px">Применяется к файлам, добавленным кнопкой «+ Добавить файлы» ниже — по желанию, для класса энергоэффективности A-F по каждому объекту.</p>
+
           <div id="portfolio-loading" class="loading hidden"><span class="spinner" aria-hidden="true"></span> Анализируем объекты портфеля…</div>
           <div id="portfolio-empty" class="empty">Пока не добавлено ни одного объекта.</div>
           <div id="portfolio-summary" class="muted hidden" style="margin:10px 0"></div>
+          <section id="portfolio-kpis" class="kpis hidden" style="margin-top:10px"></section>
           <div class="table-wrap">
             <table id="portfolio-table" class="hidden">
               <thead>
@@ -391,6 +407,7 @@
                   <th class="num">Потери, тенге</th>
                   <th class="num">Аномальных дней</th>
                   <th>База надёжна</th>
+                  <th>Класс</th>
                   <th></th>
                 </tr>
               </thead>
