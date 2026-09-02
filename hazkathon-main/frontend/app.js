@@ -45,10 +45,12 @@ function applyTheme(mode, { persist = true } = {}) {
   document.querySelectorAll(".theme-option").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === mode);
   });
-  // Chart colors are read live from CSS custom properties (inline SVG
-  // presentation attributes don't reliably resolve var()), so a theme
-  // change needs an explicit repaint once data exists.
+  // Chart and floor-plan colors are read live from CSS custom properties
+  // (inline SVG presentation attributes don't reliably resolve var()), so a
+  // theme change needs an explicit repaint of both once data exists.
+  if (typeof refreshThemeColors !== "undefined") refreshThemeColors();
   if (typeof chartState !== "undefined" && chartState.series.length) drawChart();
+  if (typeof lastAnalysis !== "undefined" && lastAnalysis) renderFloorPlan(lastAnalysis);
 }
 
 function initThemeSwitcher() {
@@ -272,12 +274,51 @@ function render(data) {
 // Each zone maps to one of the fixed hypothesis strings core.diagnose_anomaly_day()
 // produces (see core.py) — a plain lookup, not a new diagnosis of its own.
 const FLOORPLAN_ZONES = [
-  { label: "Серверная", x: 16, y: 14, w: 138, h: 92, match: (h) => h.includes("Электрооборудование") },
-  { label: "Классы / аудитории", x: 168, y: 14, w: 138, h: 92, match: (h) => h.includes("HVAC") },
-  { label: "Столовая, сан.узлы", x: 320, y: 14, w: 138, h: 92, match: (h) => h.includes("Утечка воды") },
-  { label: "Охрана и освещение", x: 472, y: 14, w: 138, h: 92, match: (h) => h.includes("Освещение") },
-  { label: "Котельная / отопление", x: 168, y: 158, w: 290, h: 66, match: (h) => h.includes("Отопление осталось") },
+  { label: "Серверная", icon: "server", x: 16, y: 14, w: 138, h: 100, match: (h) => h.includes("Электрооборудование") },
+  { label: "Классы / аудитории", icon: "book", x: 168, y: 14, w: 138, h: 100, match: (h) => h.includes("HVAC") },
+  { label: "Столовая, сан.узлы", icon: "drop", x: 320, y: 14, w: 138, h: 100, match: (h) => h.includes("Утечка воды") },
+  { label: "Охрана и освещение", icon: "bulb", x: 472, y: 14, w: 138, h: 100, match: (h) => h.includes("Освещение") },
+  { label: "Котельная / отопление", icon: "flame", x: 168, y: 152, w: 290, h: 84, match: (h) => h.includes("Отопление осталось") },
 ];
+
+// Small stroke-based pictograms, centered at (cx, cy) — a quiet visual anchor
+// per zone so the diagram reads at a glance, not a full icon library.
+function zoneIcon(type, cx, cy, color) {
+  const common = `fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`;
+  switch (type) {
+    case "server":
+      return `<g transform="translate(${cx - 11},${cy - 11})" ${common}>
+        <rect x="0.5" y="0.5" width="21" height="21" rx="3.5"/>
+        <line x1="4.5" y1="6.5" x2="14.5" y2="6.5"/>
+        <line x1="4.5" y1="11" x2="14.5" y2="11"/>
+        <line x1="4.5" y1="15.5" x2="14.5" y2="15.5"/>
+        <circle cx="18" cy="6.5" r="0.9" fill="${color}" stroke="none"/>
+        <circle cx="18" cy="11" r="0.9" fill="${color}" stroke="none"/>
+        <circle cx="18" cy="15.5" r="0.9" fill="${color}" stroke="none"/>
+      </g>`;
+    case "book":
+      return `<g transform="translate(${cx - 11},${cy - 9})" ${common}>
+        <path d="M1 2.5c3-1.5 6.5-1.5 10 0v15c-3.5-1.5-7-1.5-10 0z"/>
+        <path d="M21 2.5c-3-1.5-6.5-1.5-10 0v15c3.5-1.5 7-1.5 10 0z"/>
+      </g>`;
+    case "drop":
+      return `<g transform="translate(${cx - 7.5},${cy - 11})" ${common}>
+        <path d="M7.5 0.5C7.5 0.5 1 9.5 1 14.2A6.5 6.5 0 0 0 14 14.2C14 9.5 7.5 0.5 7.5 0.5z"/>
+      </g>`;
+    case "bulb":
+      return `<g transform="translate(${cx - 8},${cy - 11})" ${common}>
+        <path d="M8 1a6 6 0 0 0-3.3 11c.5.4.8 1.1.8 1.9v.4h5v-.4c0-.8.3-1.5.8-1.9A6 6 0 0 0 8 1z"/>
+        <line x1="6.2" y1="16.8" x2="9.8" y2="16.8"/>
+        <line x1="6.8" y1="18.6" x2="9.2" y2="18.6"/>
+      </g>`;
+    case "flame":
+      return `<g transform="translate(${cx - 6.5},${cy - 11})" ${common}>
+        <path d="M6.5 0.5c0 3.8-5 5.6-5 10A5.5 5.5 0 0 0 12 10.5c0-2.6-2-3.4-2.2-6a4 4 0 0 1-1.8 3c-.6.3-1.4-.1-1.3-.9.2-1.3-.1-3.7-.2-6.1z"/>
+      </g>`;
+    default:
+      return "";
+  }
+}
 
 function renderFloorPlan(data) {
   const box = $("floorplan-card");
@@ -292,21 +333,34 @@ function renderFloorPlan(data) {
     hit: entries.find((e) => zone.match(e.hypothesis)),
   }));
 
-  const W2 = 626, H2 = 240;
+  const W2 = 626, H2 = 250;
   let svg = `<svg viewBox="0 0 ${W2} ${H2}" role="img" aria-label="Схема здания с подсветкой вероятных причин потерь">`;
-  svg += `<rect x="0" y="118" width="${W2}" height="24" fill="${INK.surface}" stroke="${INK.border}"/>`;
-  svg += `<text x="${W2 / 2}" y="134" text-anchor="middle" fill="${INK.muted}" font-size="11">коридор</text>`;
+  // Faint dashed perimeter — reads as a floor outline without adding visual weight.
+  svg += `<rect x="2" y="2" width="${W2 - 4}" height="${H2 - 4}" rx="16" fill="none" stroke="${INK.border}" stroke-width="1" stroke-dasharray="2 5"/>`;
+  svg += `<rect x="16" y="126" width="${W2 - 32}" height="24" rx="4" fill="${INK.surface}" stroke="${INK.border}"/>`;
+  svg += `<line x1="26" y1="138" x2="${W2 - 26}" y2="138" stroke="${INK.border}" stroke-width="1" stroke-dasharray="5 5"/>`;
+  svg += `<text x="${W2 / 2}" y="142.5" text-anchor="middle" fill="${INK.muted}" font-size="10.5" letter-spacing="0.05em">КОРИДОР</text>`;
 
   hits.forEach(({ zone, hit }) => {
     const share = hit ? hit.share_pct : 0;
-    const opacity = hit ? Math.min(0.55, 0.18 + share / 150) : 0;
-    const fill = hit ? COLORS.anomaly : INK.surface;
+    const wash = hit ? Math.min(0.16, 0.05 + share / 400) : 0;
+    const cx = zone.x + zone.w / 2;
+    const iconCy = zone.y + 28;
     svg +=
-      `<rect x="${zone.x}" y="${zone.y}" width="${zone.w}" height="${zone.h}" rx="6" ` +
-      `fill="${fill}" fill-opacity="${hit ? opacity : 1}" stroke="${hit ? COLORS.anomaly : INK.border}" stroke-width="${hit ? 2 : 1}"/>`;
-    svg += `<text x="${zone.x + zone.w / 2}" y="${zone.y + zone.h / 2 - 4}" text-anchor="middle" fill="${hit ? INK.text : INK.muted}" font-size="12" font-weight="${hit ? 700 : 400}">${zone.label}</text>`;
+      `<rect x="${zone.x}" y="${zone.y}" width="${zone.w}" height="${zone.h}" rx="12" ` +
+      `fill="${hit ? COLORS.anomaly : INK.surface}" fill-opacity="${hit ? wash : 1}" stroke="${INK.border}" stroke-width="1"/>`;
     if (hit) {
-      svg += `<text x="${zone.x + zone.w / 2}" y="${zone.y + zone.h / 2 + 14}" text-anchor="middle" fill="${INK.text}" font-size="11">${hit.days} дн. (${fmt(hit.share_pct, 0)}%)</text>`;
+      // A slim top accent instead of a heavy full-border outline — a status
+      // tick tied to a real diagnosed cause, not decoration.
+      svg += `<rect x="${zone.x + 14}" y="${zone.y}" width="${zone.w - 28}" height="3" rx="1.5" fill="${COLORS.anomaly}"/>`;
+    }
+    svg += zoneIcon(zone.icon, cx, iconCy, hit ? COLORS.anomaly : INK.muted);
+    svg += `<text x="${cx}" y="${zone.y + 58}" text-anchor="middle" fill="${hit ? INK.text : INK.muted}" font-size="12" font-weight="${hit ? 700 : 500}">${zone.label}</text>`;
+    if (hit) {
+      const pillW = 78;
+      svg +=
+        `<rect x="${cx - pillW / 2}" y="${zone.y + 70}" width="${pillW}" height="20" rx="10" fill="${COLORS.anomaly}" fill-opacity="0.14"/>` +
+        `<text x="${cx}" y="${zone.y + 83.5}" text-anchor="middle" fill="${COLORS.anomaly}" font-size="11" font-weight="700">${hit.days} дн · ${fmt(hit.share_pct, 0)}%</text>`;
     }
   });
   svg += `</svg>`;

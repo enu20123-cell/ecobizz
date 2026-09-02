@@ -50,26 +50,46 @@
 :root, [data-theme="night"], [data-theme="contrast"] { color-scheme: dark; }
 [data-theme="day"], [data-theme="comfort"] { color-scheme: light; }
 
+/* "Eco-Tech & Deep Trust" — soft chalk background, white cards, deep-forest
+   header, emerald accent. Requested palette; primary (#0F382C) is scoped to
+   the top bar below rather than the whole page, since a full-page dark-green
+   background would just be the night theme again. */
 [data-theme="day"] {
-  --bg: #f5f7f9;
+  --bg: #f8fafc;
   --surface: #ffffff;
-  --surface-2: #eef1f4;
-  --border: #dde3ea;
-  --border-strong: #c7cfd8;
-  --text: #121820;
-  --muted: #5b6673;
-  --accent: #1f7a5c;
-  --accent-2: #34d399;
-  --accent-hover: #176045;
+  --surface-2: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --muted: #64748b;
+  --accent: #10b981;
+  --accent-2: #22c55e;
+  --accent-hover: #059669;
   --accent-ink: #ffffff;
-  --success: #1f9d64;
+  --success: #10b981;
   --red: #b3362b;
   --amber: #9c6b12;
   --blue: #2166a5;
   --purple: #6552a3;
   --teal: #147a83;
   --chart-offday: #8b95a1;
-  --shadow: 0 1px 2px rgba(18, 24, 32, 0.05), 0 8px 20px rgba(18, 24, 32, 0.06);
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+/* Deep-forest top bar, scoped locally: every rule below the header already
+   reads var(--text)/--muted/--border/--surface, so re-declaring just those
+   custom properties on .topbar (inheritance, not a new rule per child) is
+   enough to flip the whole bar to light-on-dark without touching anything
+   else on the page. */
+[data-theme="day"] .topbar {
+  --topbar-bg: #0f382c;
+  --text: #f8fafc;
+  --muted: #a9c4b5;
+  --border: rgba(248, 250, 252, 0.14);
+  --border-strong: rgba(248, 250, 252, 0.28);
+  --surface: #15402f;
+  --surface-2: #1b4a37;
+  --accent-soft: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 /* Eye Comfort — warmest, lowest contrast: no pure white/black anywhere,
@@ -143,11 +163,12 @@ body {
   padding: 18px 32px;
   border-bottom: 1px solid var(--border);
   background: var(--topbar-bg);
+  color: var(--text);
   backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
   z-index: 10;
-  transition: background-color 0.25s ease, border-color 0.25s ease;
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
 }
 
 .brand { display: flex; align-items: center; gap: 14px; }
@@ -591,7 +612,6 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
 .kpi {
   background: linear-gradient(180deg, var(--surface-2), var(--surface));
   border: 1px solid var(--border);
-  border-left-width: 4px;
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 16px 18px;
