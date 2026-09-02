@@ -3,6 +3,97 @@
 /* ---------- Helpers ---------- */
 const $ = (id) => document.getElementById(id);
 
+/* ---------- Theme system ---------- */
+// "auto" is a *selection mode*, not a palette: it resolves to day/night by
+// the clock (06:00–18:00 = day), not a 5th color scheme. The concrete
+// palette actually applied is always one of THEME_META's non-auto keys.
+const THEME_STORAGE_KEY = "ecobiz-theme-mode";
+const THEME_META = {
+  auto: { icon: "🌗", label: "Авто" },
+  day: { icon: "☀️", label: "День" },
+  night: { icon: "🌙", label: "Ночь" },
+  comfort: { icon: "👁", label: "Комфорт глаз" },
+  contrast: { icon: "◐", label: "Высокий контраст" },
+};
+
+function resolveAutoTheme() {
+  const hour = new Date().getHours();
+  return hour >= 6 && hour < 18 ? "day" : "night";
+}
+
+function getThemeMode() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY) || "night";
+  } catch {
+    return "night";
+  }
+}
+
+function applyTheme(mode, { persist = true } = {}) {
+  const resolved = mode === "auto" ? resolveAutoTheme() : mode;
+  document.documentElement.setAttribute("data-theme", resolved);
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, mode);
+    } catch {
+      // Private browsing / storage disabled — theme just won't persist across reloads.
+    }
+  }
+  const meta = THEME_META[mode];
+  $("theme-switcher-icon").textContent = mode === "auto" ? THEME_META[resolved].icon : meta.icon;
+  $("theme-switcher-label").textContent = meta.label;
+  document.querySelectorAll(".theme-option").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mode === mode);
+  });
+  // Chart colors are read live from CSS custom properties (inline SVG
+  // presentation attributes don't reliably resolve var()), so a theme
+  // change needs an explicit repaint once data exists.
+  if (typeof chartState !== "undefined" && chartState.series.length) drawChart();
+}
+
+function initThemeSwitcher() {
+  const mode = getThemeMode();
+  applyTheme(mode, { persist: false });
+
+  const btn = $("theme-switcher-btn");
+  const menu = $("theme-menu");
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const willOpen = menu.classList.contains("hidden");
+    menu.classList.toggle("hidden", !willOpen);
+    btn.setAttribute("aria-expanded", String(willOpen));
+  });
+  document.querySelectorAll(".theme-option").forEach((option) =>
+    option.addEventListener("click", () => {
+      applyTheme(option.dataset.mode);
+      menu.classList.add("hidden");
+      btn.setAttribute("aria-expanded", "false");
+    }),
+  );
+  document.addEventListener("click", (ev) => {
+    if (!menu.classList.contains("hidden") && !$("theme-switcher").contains(ev.target)) {
+      menu.classList.add("hidden");
+      btn.setAttribute("aria-expanded", "false");
+    }
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") {
+      menu.classList.add("hidden");
+      btn.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  // Re-resolve "auto" when the tab regains focus and every 5 minutes while
+  // open, so a long-open session still crosses the 06:00/18:00 boundary.
+  const reapplyIfAuto = () => {
+    if (getThemeMode() === "auto") applyTheme("auto", { persist: false });
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") reapplyIfAuto();
+  });
+  setInterval(reapplyIfAuto, 5 * 60 * 1000);
+}
+
 // Try the origin serving the page first; if it is not our API (e.g. VS Code
 // Live Server or a plain static server, which reject POSTs with 405),
 // automatically fall back to the backend on port 8000.
@@ -755,18 +846,32 @@ function renderTable(series, s) {
 const W = 1000;
 const H = 380;
 const MARGIN = { top: 24, right: 22, bottom: 46, left: 64 };
-// Mirrors the CSS custom properties in styles.css (:root) — kept as literal
-// hex here because inline SVG presentation attributes don't reliably resolve
-// var() across browsers, so this is the one place the palette is duplicated.
-const COLORS = { workday: "#5ec8ff", offday: "#5b6a60", anomaly: "#ff6b6b" };
-const INK = {
-  text: "#eef6f0",
-  muted: "#93a89a",
-  grid: "#263029",
-  amber: "#ffc24b",
-  surface: "#121a15",
-  border: "#37453c",
-};
+// SVG presentation attributes don't reliably resolve var() across browsers,
+// so chart colors are read live from the CSS custom properties in
+// styles.css instead of being hardcoded — refreshThemeColors() mutates
+// these two objects in place every time the active theme could have
+// changed, so every drawing helper below just reads COLORS.x / INK.x as
+// plain values without needing to know about theming at all.
+const COLORS = { workday: "", offday: "", anomaly: "" };
+const INK = { text: "", muted: "", grid: "", amber: "", surface: "", border: "" };
+
+function themeColor(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+function refreshThemeColors() {
+  COLORS.workday = themeColor("--blue");
+  COLORS.offday = themeColor("--chart-offday");
+  COLORS.anomaly = themeColor("--red");
+  INK.text = themeColor("--text");
+  INK.muted = themeColor("--muted");
+  INK.grid = themeColor("--border");
+  INK.amber = themeColor("--amber");
+  INK.surface = themeColor("--surface");
+  INK.border = themeColor("--border-strong");
+}
+refreshThemeColors();
+
 const MIN_SPAN = 4;
 
 const chartState = {
@@ -882,7 +987,7 @@ function drawBarsSvg(items, y) {
     const cx = xCenter(i);
     const yTop = y.yScale(d.kwh);
     const kind = d.excess > 0 ? "anomaly" : d.closed ? "offday" : "workday";
-    svg += `<rect class="bar" style="animation-delay:${Math.min(i * 14, 600)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${(MARGIN.top + y.innerH - yTop).toFixed(1)}" rx="4" fill="url(#g-${kind})"${d.excess > 0 ? ' stroke="#ffb0b0" stroke-width="1"' : ""}/>`;
+    svg += `<rect class="bar" style="animation-delay:${Math.min(i * 14, 600)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${(MARGIN.top + y.innerH - yTop).toFixed(1)}" rx="4" fill="url(#g-${kind})"${d.excess > 0 ? ` stroke="${INK.surface}" stroke-width="1"` : ""}/>`;
     if ((chartState.anim || d.excess > 0) && (n <= 21 || d.excess > 0 || i % step === 0)) {
       svg += `<text x="${cx.toFixed(1)}" y="${(yTop - 5).toFixed(1)}" fill="${d.excess > 0 ? COLORS.anomaly : INK.muted}" font-size="${d.excess > 0 ? 11 : 9.5}" font-weight="${d.excess > 0 ? 700 : 400}" text-anchor="middle">${d.excess > 0 ? "+" + fmt(d.excess) : fmt(d.kwh)}</text>`;
     }
@@ -900,7 +1005,7 @@ function drawLineSvg(items, y) {
     `<path class="fade-in" d="M${pts[0]} L${pts.join(" L")} L${xCenter(n - 1).toFixed(1)},${(MARGIN.top + y.innerH).toFixed(1)} L${MARGIN.left},${(MARGIN.top + y.innerH).toFixed(1)} Z" fill="url(#g-area)"/>` +
     `<polyline points="${pts.join(" ")}" fill="none" stroke="${COLORS.workday}" stroke-width="2.5" stroke-linejoin="round"/>`;
   items.forEach((d, i) => {
-    svg += `<circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.kwh).toFixed(1)}" r="${d.excess > 0 ? 4.5 : 2.6}" fill="${d.color}"${d.excess > 0 ? ' stroke="#ffffff" stroke-width="1.2"' : ""}/>`;
+    svg += `<circle cx="${xCenter(i).toFixed(1)}" cy="${y.yScale(d.kwh).toFixed(1)}" r="${d.excess > 0 ? 4.5 : 2.6}" fill="${d.color}"${d.excess > 0 ? ` stroke="${INK.surface}" stroke-width="1.2"` : ""}/>`;
   });
   svg += xLabelsFor(items, xCenter, items.map((d) => shortDate(d.label)));
   return { svg, xCenter };
@@ -1129,6 +1234,7 @@ function renderChart(series, threshold) {
 }
 
 function drawChart() {
+  refreshThemeColors();
   const { series, view } = chartState;
   if (!series.length) return;
   if (view === "donut") { drawDonut(series); return; }
@@ -1853,6 +1959,7 @@ $("ocr-analyze-btn").addEventListener("click", () => {
   analyze(formData, file.name);
 });
 
+initThemeSwitcher();
 loadTelegramLink();
 loadProvenanceTable();
 

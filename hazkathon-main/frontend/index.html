@@ -7,6 +7,21 @@
   <title>EcoBiz Copilot - детектор потерь энергии</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
   <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Applied before first paint so switching themes never causes a flash
+    // of the wrong palette on load.
+    (function () {
+      try {
+        var stored = localStorage.getItem("ecobiz-theme-mode") || "night";
+        var resolved = stored;
+        if (stored === "auto") {
+          var hour = new Date().getHours();
+          resolved = hour >= 6 && hour < 18 ? "day" : "night";
+        }
+        document.documentElement.setAttribute("data-theme", resolved);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -18,6 +33,18 @@
       </div>
     </div>
     <div class="controls">
+      <div class="theme-switcher" id="theme-switcher">
+        <button class="theme-switcher-btn" id="theme-switcher-btn" type="button" aria-haspopup="true" aria-expanded="false">
+          <span id="theme-switcher-icon">🌙</span> <span id="theme-switcher-label">Тема</span> <span class="chevron">▾</span>
+        </button>
+        <div class="theme-menu hidden" id="theme-menu" role="menu">
+          <button class="theme-option" data-mode="auto" type="button" role="menuitem"><span class="icon">🌗</span> Авто (по времени суток)</button>
+          <button class="theme-option" data-mode="day" type="button" role="menuitem"><span class="icon">☀️</span> День</button>
+          <button class="theme-option" data-mode="night" type="button" role="menuitem"><span class="icon">🌙</span> Ночь</button>
+          <button class="theme-option" data-mode="comfort" type="button" role="menuitem"><span class="icon">👁</span> Комфорт глаз</button>
+          <button class="theme-option" data-mode="contrast" type="button" role="menuitem"><span class="icon">◐</span> Высокий контраст</button>
+        </div>
+      </div>
       <label class="field" for="tariff">
         <span>Тариф</span>
         <input id="tariff" type="number" step="0.001" min="0" value="17.447" />
