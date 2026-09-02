@@ -1628,68 +1628,248 @@ function openPrintWindow(html) {
 
 $("download-btn").addEventListener("click", () => openPrintWindow(buildReportHtml()));
 
-/* ---------- "Служебная записка" — a ready-to-print official memo draft ---------- */
-function buildMemoHtml() {
-  if (!lastAnalysis) return "";
-  const { summary: s, source } = lastAnalysis;
-  const today = new Date().toLocaleDateString("ru-RU");
-  const top = computeTopPriorityAction(lastAnalysis);
-  const findings = [
-    `За период анализа (${s.days_analyzed} дн.) зафиксировано ${s.anomaly_days} нерабочий(их) день(дней), в которые потребление энергии соответствовало занятому зданию.`,
-    `Суммарный избыточный расход составил ${fmt(s.total_excess_kwh, 1)} кВт·ч, что эквивалентно ${fmt(s.savings_kzt)} тенге.`,
-    s.baseline_reliable
-      ? "Базовый уровень потребления подтверждён достаточным объёмом данных по нерабочим дням."
-      : `Базовый уровень построен по ${s.off_day_samples} нерабочему(им) дню(дням) — предварительный сигнал, рекомендуется уточнить на более длинной истории.`,
-  ];
-  if (top) {
-    findings.push(`Наиболее вероятная причина по расчёту: «${top.hypothesis.split(" — ")[0]}» (${fmt(top.sharePct, 0)}% посчитанного перерасхода).`);
-  }
-  const recommendation = top
-    ? actionForHypothesis(top.hypothesis)
-    : "Проверить расписание инженерных систем на нерабочие дни.";
-
-  return `<!doctype html>
-<html lang="ru"><head><meta charset="utf-8" />
-<title>Служебная записка — ${source}</title>
-<style>
-  body { font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; padding: 36px; max-width: 720px; margin: 0 auto; }
-  h1 { font-size: 17px; text-align: center; text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 4px; }
-  .subtitle { text-align: center; color: #555; font-size: 12.5px; margin-bottom: 28px; }
-  .field { margin-bottom: 14px; }
-  .field .k { font-weight: 700; }
-  ol { padding-left: 20px; }
-  li { margin-bottom: 8px; }
-  .sign { margin-top: 56px; display: flex; justify-content: space-between; }
-  .sign .line { border-top: 1px solid #111; width: 220px; padding-top: 4px; font-size: 12px; color: #555; }
-  @media print { body { padding: 0; } }
-</style></head>
-<body>
-  <h1>Служебная записка</h1>
-  <p class="subtitle">по результатам автоматического анализа энергопотребления · EcoBiz Copilot</p>
-  <div class="field"><span class="k">Дата:</span> ${today}</div>
-  <div class="field"><span class="k">Объект / источник данных:</span> ${source}</div>
-  <div class="field"><span class="k">Кому:</span> _______________________________</div>
-  <div class="field"><span class="k">От кого:</span> _______________________________</div>
-
-  <p class="field k">Установлено:</p>
-  <ol>${findings.map((f) => `<li>${f}</li>`).join("")}</ol>
-
-  <p class="field k">Рекомендуется:</p>
-  <ol><li>${recommendation}</li><li>Повторно проверить показатели после внесения изменений в расписание инженерных систем.</li></ol>
-
-  <p class="muted" style="font-size:11.5px; color:#777; margin-top:20px">
-    Цифры рассчитаны автоматически (25-й перцентиль потребления в нерабочие дни × порог ${fmt(s.multiplier, 1)});
-    методика и источники констант — см. вкладку «О методе» дашборда EcoBiz Copilot.
-  </p>
-
-  <div class="sign">
-    <div class="line">Подпись, расшифровка</div>
-    <div class="line">Дата</div>
-  </div>
-</body></html>`;
+/* ---------- Loss-act PDF ("Акт потерь") — a real, one-click downloadable
+   file (jsPDF) instead of the earlier print-dialog HTML memo it replaces:
+   same content (findings, top-priority cause, recommendation, signature
+   fields), plus a QR code linking to the Telegram bot. ---------- */
+let jsPdfLoadPromise = null;
+function loadJsPdf() {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve();
+  if (jsPdfLoadPromise) return jsPdfLoadPromise;
+  jsPdfLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Не удалось загрузить библиотеку PDF — проверьте интернет-соединение."));
+    document.head.appendChild(script);
+  });
+  return jsPdfLoadPromise;
 }
 
-$("download-memo-btn").addEventListener("click", () => openPrintWindow(buildMemoHtml()));
+let qrCodeLoadPromise = null;
+function loadQrCodeLib() {
+  if (window.QRCode) return Promise.resolve();
+  if (qrCodeLoadPromise) return qrCodeLoadPromise;
+  qrCodeLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Не удалось загрузить библиотеку QR-кода — проверьте интернет-соединение."));
+    document.head.appendChild(script);
+  });
+  return qrCodeLoadPromise;
+}
+
+// A real convenience (scan to open the same live bot), not a decorative or
+// fake element — encodes whatever link the header's Telegram button already
+// resolved to, so there is exactly one source of truth for the bot's URL.
+function generateQrDataUrl(text) {
+  return new Promise((resolve) => {
+    const container = document.createElement("div");
+    container.style.cssText = "position:absolute;left:-9999px;top:-9999px;";
+    document.body.appendChild(container);
+    new window.QRCode(container, { text, width: 180, height: 180, correctLevel: window.QRCode.CorrectLevel.M });
+    // QRCode.js renders synchronously into a <canvas> in every modern
+    // browser; the short delay is just a safety margin for the rare <img>
+    // fallback path, not a real async render.
+    setTimeout(() => {
+      const canvas = container.querySelector("canvas");
+      const img = container.querySelector("img");
+      const dataUrl = canvas ? canvas.toDataURL("image/png") : img ? img.src : null;
+      document.body.removeChild(container);
+      resolve(dataUrl);
+    }, 50);
+  });
+}
+
+async function downloadLossActPdf() {
+  if (!lastAnalysis) return;
+  const btn = $("download-memo-btn");
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Формируем PDF…";
+  try {
+    await loadJsPdf();
+    const { summary: s, source } = lastAnalysis;
+    const today = new Date().toLocaleDateString("ru-RU");
+    const top = computeTopPriorityAction(lastAnalysis);
+    const findings = [
+      `За период анализа (${s.days_analyzed} дн.) зафиксировано ${s.anomaly_days} нерабочий(их) день(дней), в которые потребление энергии соответствовало занятому зданию.`,
+      `Суммарный избыточный расход составил ${fmt(s.total_excess_kwh, 1)} кВт·ч, что эквивалентно ${fmt(s.savings_kzt)} тенге.`,
+      s.baseline_reliable
+        ? "Базовый уровень потребления подтверждён достаточным объёмом данных по нерабочим дням."
+        : `Базовый уровень построен по ${s.off_day_samples} нерабочему(им) дню(дням) — предварительный сигнал, рекомендуется уточнить на более длинной истории.`,
+    ];
+    if (top) {
+      findings.push(`Наиболее вероятная причина по расчёту: «${top.hypothesis.split(" — ")[0]}» (${fmt(top.sharePct, 0)}% посчитанного перерасхода).`);
+    }
+    const recommendations = [
+      top ? actionForHypothesis(top.hypothesis) : "Проверить расписание инженерных систем на нерабочие дни.",
+      "Повторно проверить показатели после внесения изменений в расписание инженерных систем.",
+    ];
+
+    // Rendered on an offscreen <canvas> and embedded as one full-page
+    // image, rather than drawn with jsPDF's own doc.text(): jsPDF's built-in
+    // fonts (Helvetica/Times/Courier) only cover Latin/WinAnsi, so Cyrillic
+    // text drawn directly comes out as mojibake. <canvas> text rendering
+    // uses the OS's own font stack, which handles Cyrillic natively with no
+    // font file to source or embed.
+    const PX_PER_MM = 5.9; // ~150dpi at A4
+    const pageWmm = 210;
+    const pageHmm = 297;
+    const W = Math.round(pageWmm * PX_PER_MM);
+    const H = Math.round(pageHmm * PX_PER_MM);
+    const mm = (v) => v * PX_PER_MM;
+    const FONT_STACK = '-apple-system, "Segoe UI", Roboto, Arial, sans-serif';
+
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, H);
+    ctx.textBaseline = "alphabetic";
+
+    const marginX = mm(20);
+    const maxTextWidth = W - marginX * 2;
+
+    function wrapText(text, font, maxWidth) {
+      ctx.font = font;
+      const words = text.split(" ");
+      const lines = [];
+      let line = "";
+      for (const word of words) {
+        const test = line ? `${line} ${word}` : word;
+        if (line && ctx.measureText(test).width > maxWidth) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = test;
+        }
+      }
+      if (line) lines.push(line);
+      return lines;
+    }
+
+    let y = mm(24);
+
+    ctx.fillStyle = "#34d399";
+    ctx.font = `700 ${mm(6)}px ${FONT_STACK}`;
+    ctx.textAlign = "left";
+    ctx.fillText("EcoBiz", marginX, y);
+    y += mm(10);
+
+    ctx.fillStyle = "#141414";
+    ctx.font = `700 ${mm(5)}px ${FONT_STACK}`;
+    ctx.textAlign = "center";
+    ctx.fillText("АКТ ОБСЛЕДОВАНИЯ ПОТЕРЬ ЭНЕРГИИ", W / 2, y);
+    y += mm(6);
+    ctx.fillStyle = "#5a5a5a";
+    ctx.font = `400 ${mm(3.5)}px ${FONT_STACK}`;
+    ctx.fillText("по результатам автоматического анализа энергопотребления · EcoBiz Copilot", W / 2, y);
+    ctx.textAlign = "left";
+    y += mm(12);
+
+    ctx.fillStyle = "#141414";
+    ctx.font = `400 ${mm(4)}px ${FONT_STACK}`;
+    for (const line of [`Дата: ${today}`, `Объект / источник данных: ${source}`, "Кому: _______________________________", "От кого: _______________________________"]) {
+      ctx.fillText(line, marginX, y);
+      y += mm(7.5);
+    }
+    y += mm(4);
+
+    function writeBlock(title, items) {
+      ctx.fillStyle = "#141414";
+      ctx.font = `700 ${mm(4.2)}px ${FONT_STACK}`;
+      ctx.fillText(title, marginX, y);
+      y += mm(7);
+      ctx.font = `400 ${mm(4)}px ${FONT_STACK}`;
+      items.forEach((item, i) => {
+        const lines = wrapText(`${i + 1}. ${item}`, ctx.font, maxTextWidth - mm(2));
+        for (const l of lines) {
+          ctx.fillText(l, marginX + mm(2), y);
+          y += mm(5.6);
+        }
+        y += mm(1.5);
+      });
+      y += mm(3);
+    }
+    writeBlock("Установлено:", findings);
+    writeBlock("Рекомендуется:", recommendations);
+
+    // QR code — a real convenience (scan to open the same live bot with the
+    // page's own Telegram link), not a decorative element.
+    const telegramLink = document.querySelector(".js-telegram-link:not(.hidden)");
+    let qrImg = null;
+    if (telegramLink && telegramLink.href) {
+      try {
+        await loadQrCodeLib();
+        const dataUrl = await generateQrDataUrl(telegramLink.href);
+        if (dataUrl) {
+          qrImg = await new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = dataUrl;
+          });
+        }
+      } catch {
+        qrImg = null; // graceful — the act is still complete without it
+      }
+    }
+    const qrSize = mm(28);
+    const blockTopY = y;
+    if (qrImg) {
+      ctx.drawImage(qrImg, W - marginX - qrSize, blockTopY, qrSize, qrSize);
+      ctx.fillStyle = "#6e6e6e";
+      ctx.font = `400 ${mm(3)}px ${FONT_STACK}`;
+      ctx.fillText("Открыть бота EcoBiz", W - marginX - qrSize, blockTopY + qrSize + mm(4));
+    }
+
+    ctx.fillStyle = "#787878";
+    ctx.font = `400 ${mm(3.2)}px ${FONT_STACK}`;
+    const noteWidth = maxTextWidth - (qrImg ? qrSize + mm(8) : 0);
+    const noteLines = wrapText(
+      `Цифры рассчитаны автоматически (25-й перцентиль потребления в нерабочие дни × порог ${fmt(s.multiplier, 1)}); методика и источники констант — см. вкладку «О методе» дашборда EcoBiz Copilot.`,
+      ctx.font,
+      noteWidth,
+    );
+    for (const l of noteLines) {
+      ctx.fillText(l, marginX, y);
+      y += mm(4.6);
+    }
+    y = Math.max(y, qrImg ? blockTopY + qrSize + mm(10) : y) + mm(20);
+
+    const signY = Math.min(Math.max(y, mm(250)), mm(275));
+    ctx.strokeStyle = "#3c3c3c";
+    ctx.lineWidth = Math.max(1, mm(0.2));
+    ctx.beginPath();
+    ctx.moveTo(marginX, signY);
+    ctx.lineTo(marginX + mm(65), signY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(W - marginX - mm(45), signY);
+    ctx.lineTo(W - marginX, signY);
+    ctx.stroke();
+    ctx.fillStyle = "#555555";
+    ctx.font = `400 ${mm(3.2)}px ${FONT_STACK}`;
+    ctx.fillText("Подпись, расшифровка", marginX, signY + mm(5));
+    ctx.fillText("Дата", W - marginX - mm(45), signY + mm(5));
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    doc.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, pageWmm, pageHmm);
+    doc.save(`akt-poter-${today.replace(/\./g, "-")}.pdf`);
+  } catch (err) {
+    showStatus(`Не удалось сформировать PDF — ${err.message}`, true);
+    setTimeout(hideStatus, 6000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
+$("download-memo-btn").addEventListener("click", downloadLossActPdf);
 
 /* ---------- Telegram link + provenance table (fetched once, not per-analysis) ---------- */
 async function loadTelegramLink() {
