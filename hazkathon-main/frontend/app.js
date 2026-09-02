@@ -627,6 +627,37 @@ function renderCauseSummary(data) {
     )
     .join("");
   box.classList.remove("hidden");
+  renderCrossResourceNote(data);
+}
+
+// A small, honest addition on top of cause_summary — not a new detection
+// pass, just counting how often electricity's anomalies co-occur with each
+// other present resource's, from data already in the response.
+function renderCrossResourceNote(data) {
+  const el = $("cross-resource-note");
+  const resources = data.resources || {};
+  const others = Object.keys(resources).filter((k) => k !== "electricity");
+  const elec = resources.electricity;
+  if (!elec || !others.length) {
+    el.classList.add("hidden");
+    return;
+  }
+  const elecAnomalyDates = new Set(elec.series.filter((d) => d.is_anomaly).map((d) => d.date));
+  if (!elecAnomalyDates.size) {
+    el.classList.add("hidden");
+    return;
+  }
+  const lines = others.map((key) => {
+    const otherAnomalyDates = new Set(resources[key].series.filter((d) => d.is_anomaly).map((d) => d.date));
+    let co = 0;
+    elecAnomalyDates.forEach((date) => { if (otherAnomalyDates.has(date)) co++; });
+    const pct = Math.round((co / elecAnomalyDates.size) * 100);
+    return `${resources[key].label.toLowerCase()} тоже аномальн${key === "water" ? "а" : "о"} в <strong>${pct}%</strong> из них`;
+  });
+  el.innerHTML =
+    `Дополнительно, по факту (не по гипотезе выше — там каждому дню присвоена только одна причина): ` +
+    `в дни, когда аномально электричество, ${lines.join("; ")}.`;
+  el.classList.remove("hidden");
 }
 
 // Reuses the exact same savings_kzt × 3 / × 12 projection already shown on
@@ -636,7 +667,8 @@ function renderForecast(data) {
   const base = s.savings_kzt;
 
   const cards = [
-    { label: "Текущий период", cls: "green", value: base, note: `${s.days_analyzed} дн. проанализировано` },
+    { label: "Текущий период (факт)", cls: "green", value: base, note: `${s.days_analyzed} дн. проанализировано` },
+    { label: "Прогноз на следующий месяц", cls: "blue", value: base, note: "проекция при аналогичной динамике, не гарантированный результат" },
     { label: "Прогноз за 3 месяца", cls: "teal", value: base * 3, note: "проекция, не гарантированный результат" },
     { label: "Прогноз за год", cls: "purple", value: base * 12, note: "проекция, не гарантированный результат" },
   ];
