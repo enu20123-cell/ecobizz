@@ -274,11 +274,11 @@ function render(data) {
 // Each zone maps to one of the fixed hypothesis strings core.diagnose_anomaly_day()
 // produces (see core.py) — a plain lookup, not a new diagnosis of its own.
 const FLOORPLAN_ZONES = [
-  { label: "Серверная", icon: "server", x: 14, y: 12, w: 148, h: 100, match: (h) => h.includes("Электрооборудование") },
-  { label: "Классы / аудитории", icon: "book", x: 162, y: 12, w: 148, h: 100, match: (h) => h.includes("HVAC") },
-  { label: "Столовая, сан.узлы", icon: "drop", x: 310, y: 12, w: 148, h: 100, match: (h) => h.includes("Утечка воды") },
-  { label: "Охрана и освещение", icon: "bulb", x: 458, y: 12, w: 148, h: 100, match: (h) => h.includes("Освещение") },
-  { label: "Котельная / отопление", icon: "flame", x: 162, y: 136, w: 296, h: 82, match: (h) => h.includes("Отопление осталось") },
+  { label: "Серверная", icon: "server", x: 14, y: 15, w: 148, h: 96, match: (h) => h.includes("Электрооборудование") },
+  { label: "Классы / аудитории", icon: "book", x: 162, y: 15, w: 148, h: 96, match: (h) => h.includes("HVAC") },
+  { label: "Столовая, сан.узлы", icon: "drop", x: 310, y: 15, w: 148, h: 96, match: (h) => h.includes("Утечка воды") },
+  { label: "Охрана и освещение", icon: "bulb", x: 458, y: 15, w: 148, h: 96, match: (h) => h.includes("Освещение") },
+  { label: "Котельная / отопление", icon: "flame", x: 162, y: 145, w: 296, h: 74, match: (h) => h.includes("Отопление осталось") },
 ];
 
 // Flat RGB blend — a controlled, opaque tint instead of alpha-compositing a
@@ -342,43 +342,78 @@ function renderFloorPlan(data) {
     hit: entries.find((e) => zone.match(e.hypothesis)),
   }));
 
-  const W2 = 620, H2 = 232;
-  const outline = { x: 8, y: 6, w: W2 - 16, h: 220 };
+  const W2 = 620, H2 = 240;
+  const outline = { x: 14, y: 12, w: W2 - 28, h: 210 };
+  const wallW = 5;
   let svg = `<svg viewBox="0 0 ${W2} ${H2}" role="img" aria-label="Схема здания с подсветкой вероятных причин потерь">`;
-  // One solid building outline — the exterior wall, not a UI card border.
-  svg += `<rect x="${outline.x}" y="${outline.y}" width="${outline.w}" height="${outline.h}" rx="6" fill="none" stroke="${INK.border}" stroke-width="1.5"/>`;
-  // Corridor: a plain interior band, not another bordered card.
-  svg += `<rect x="${outline.x}" y="112" width="${outline.w}" height="24" fill="${INK.surface}"/>`;
-  svg += `<line x1="${outline.x}" y1="112" x2="${outline.x + outline.w}" y2="112" stroke="${INK.border}" stroke-width="1"/>`;
-  svg += `<line x1="${outline.x}" y1="136" x2="${outline.x + outline.w}" y2="136" stroke="${INK.border}" stroke-width="1"/>`;
-  svg += `<text x="${W2 / 2}" y="127.5" text-anchor="middle" fill="${INK.muted}" font-size="10" letter-spacing="0.14em">КОРИДОР</text>`;
+
+  const gridId = "fp-grid", shadowId = "fp-shadow", glowId = "fp-glow";
+  svg += `<defs>
+    <pattern id="${gridId}" width="18" height="18" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="${INK.grid}" fill-opacity="0.5"/>
+    </pattern>
+    <filter id="${shadowId}" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+    <filter id="${glowId}" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="0" stdDeviation="7" flood-color="${COLORS.anomaly}" flood-opacity="0.55"/>
+    </filter>
+  </defs>`;
+
+  // The whole plan sits on one elevated sheet, like a blueprint lifted off
+  // the page — one shadow for the diagram, not one per room.
+  svg += `<g filter="url(#${shadowId})">`;
+  svg += `<rect x="${outline.x}" y="${outline.y}" width="${outline.w}" height="${outline.h}" rx="4" fill="${INK.surface}" stroke="${INK.border}" stroke-width="2"/>`;
+  svg += `</g>`;
+  svg += `<rect x="${outline.x + 1}" y="${outline.y + 1}" width="${outline.w - 2}" height="${outline.h - 2}" rx="3" fill="url(#${gridId})"/>`;
+
+  // Corridor: a plain interior band bounded by two wall bands (filled, not
+  // hairline strokes) — reads as construction, not a UI divider.
+  const corrY = 116, corrH = 24;
+  svg += `<rect x="${outline.x}" y="${corrY - wallW}" width="${outline.w}" height="${wallW}" fill="${INK.border}"/>`;
+  svg += `<rect x="${outline.x}" y="${corrY + corrH}" width="${outline.w}" height="${wallW}" fill="${INK.border}"/>`;
+  svg += `<text x="${W2 / 2}" y="${corrY + corrH / 2 + 4}" text-anchor="middle" fill="${INK.muted}" font-size="10" letter-spacing="0.16em">КОРИДОР</text>`;
 
   hits.forEach(({ zone, hit }, i) => {
     const cx = zone.x + zone.w / 2;
     const iconCy = zone.y + 30;
     if (hit) {
-      const tint = mixHex(INK.surface, COLORS.anomaly, 0.1);
-      svg += `<rect x="${zone.x}" y="${zone.y}" width="${zone.w}" height="${zone.h}" fill="${tint}"/>`;
+      const tint = mixHex(INK.surface, COLORS.anomaly, 0.12);
+      svg += `<g filter="url(#${glowId})"><rect x="${zone.x + 3}" y="${zone.y + 3}" width="${zone.w - 6}" height="${zone.h - 6}" fill="${tint}"/></g>`;
     }
-    // Rooms share walls (adjoining edges, no card gap) — each interior
-    // partition drawn once, at its left edge; the boiler room additionally
-    // needs its own right edge since nothing else in the row supplies it.
-    if (i > 0 && i < 4) svg += `<line x1="${zone.x}" y1="${zone.y}" x2="${zone.x}" y2="${zone.y + zone.h}" stroke="${INK.border}" stroke-width="1"/>`;
+    // Rooms share walls (filled bands with real thickness, not hairline
+    // strokes) — each interior partition drawn once, at its left edge; the
+    // boiler room additionally needs its own right edge since nothing else
+    // in the row supplies it.
+    if (i > 0 && i < 4) svg += `<rect x="${zone.x - wallW / 2}" y="${zone.y}" width="${wallW}" height="${zone.h}" fill="${INK.border}"/>`;
     if (i === 4) {
-      svg += `<line x1="${zone.x}" y1="${zone.y}" x2="${zone.x}" y2="${zone.y + zone.h}" stroke="${INK.border}" stroke-width="1"/>`;
-      svg += `<line x1="${zone.x + zone.w}" y1="${zone.y}" x2="${zone.x + zone.w}" y2="${zone.y + zone.h}" stroke="${INK.border}" stroke-width="1"/>`;
+      svg += `<rect x="${zone.x - wallW / 2}" y="${zone.y}" width="${wallW}" height="${zone.h}" fill="${INK.border}"/>`;
+      svg += `<rect x="${zone.x + zone.w - wallW / 2}" y="${zone.y}" width="${wallW}" height="${zone.h}" fill="${INK.border}"/>`;
     }
     if (hit) {
       // A fixed-position corner dot — a status indicator, not text laid out
       // around a measured width.
-      svg += `<circle cx="${zone.x + zone.w - 14}" cy="${zone.y + 14}" r="4" fill="${COLORS.anomaly}"/>`;
+      svg += `<circle cx="${zone.x + zone.w - 16}" cy="${zone.y + 16}" r="4.5" fill="${COLORS.anomaly}"/>`;
     }
     svg += zoneIcon(zone.icon, cx, iconCy, hit ? INK.text : INK.muted);
     svg += `<text x="${cx}" y="${zone.y + 58}" text-anchor="middle" fill="${hit ? INK.text : INK.muted}" font-size="12" font-weight="${hit ? 700 : 500}">${zone.label}</text>`;
     if (hit) {
-      svg += `<text x="${cx}" y="${zone.y + 76}" text-anchor="middle" fill="${COLORS.anomaly}" font-size="11.5" font-weight="700">${hit.days} дн · ${fmt(hit.share_pct, 0)}%</text>`;
+      // Anchored to the room's own bottom edge, not a fixed offset from the
+      // top — keeps the caption inside rooms of different heights (the
+      // boiler room is shorter than the top row).
+      svg += `<text x="${cx}" y="${zone.y + zone.h - 10}" text-anchor="middle" fill="${COLORS.anomaly}" font-size="11.5" font-weight="700">${hit.days} дн · ${fmt(hit.share_pct, 0)}%</text>`;
     }
   });
+
+  // A small compass mark — the one authentic architectural-drawing detail
+  // that instantly signals "real floor plan," not a UI diagram.
+  const nx = outline.x + outline.w - 24, ny = outline.y + outline.h - 26;
+  svg += `<g stroke="${INK.grid}" stroke-width="1" fill="none">
+    <circle cx="${nx}" cy="${ny}" r="13"/>
+    <path d="M${nx} ${ny - 9} L${nx + 3.5} ${ny - 2} L${nx} ${ny - 4.5} L${nx - 3.5} ${ny - 2} Z" fill="${INK.grid}" stroke="none"/>
+    <text x="${nx}" y="${ny + 10.5}" text-anchor="middle" font-size="8" fill="${INK.muted}" stroke="none">N</text>
+  </g>`;
+
   svg += `</svg>`;
   $("floorplan-svg").innerHTML = svg;
 
