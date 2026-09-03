@@ -45,6 +45,19 @@
   --logo-glow: color-mix(in srgb, var(--accent-2) 35%, transparent);
   --glow-1: color-mix(in srgb, var(--accent-2) 8%, transparent);
   --glow-2: color-mix(in srgb, var(--accent) 7%, transparent);
+
+  /* Typography system — three faces, three distinct jobs. Inter for body
+     copy and dense UI (highest legibility at small sizes, full Cyrillic).
+     Plus Jakarta Sans for display/headings only (friendlier geometric
+     proportions, never used for paragraph text). JetBrains Mono for
+     anything that's a number to be compared or a technical readout (KPIs,
+     table figures, OCR fields, model/status strings) — real monospace
+     digits align in a way tabular-nums on a proportional face can't quite
+     match. Each has a system-font fallback chain so a slow/blocked Google
+     Fonts load never leaves text invisible or unstyled.  */
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Plus Jakarta Sans", var(--font-body);
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 :root, [data-theme="night"], [data-theme="contrast"] { color-scheme: dark; }
@@ -148,7 +161,7 @@ body {
     radial-gradient(1000px 480px at 88% 0%, var(--glow-2), transparent),
     var(--bg);
   color: var(--text);
-  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.55 var(--font-body);
   min-height: 100vh;
   transition: background-color 0.25s ease, color 0.25s ease;
 }
@@ -173,8 +186,8 @@ body {
 
 .brand { display: flex; align-items: center; gap: 14px; }
 .logo { width: 36px; height: 36px; flex: none; filter: drop-shadow(0 0 12px var(--logo-glow)); }
-.brand h1 { font-size: 20px; letter-spacing: -0.02em; }
-.brand p { color: var(--muted); font-size: 13px; }
+.brand h1 { font: 700 20px/1.2 var(--font-display); letter-spacing: -0.02em; }
+.brand p { color: var(--muted); font-size: 13px; font-weight: 500; }
 
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 
@@ -242,7 +255,8 @@ body {
   border-radius: 8px;
   background: var(--surface);
   color: var(--text);
-  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 14px;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .field input:focus {
@@ -303,6 +317,14 @@ body {
 main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
 .hidden { display: none !important; }
 .muted { color: var(--muted); font-size: 12.5px; }
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
 
 .status {
   padding: 13px 18px;
@@ -363,8 +385,8 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
   padding: 0 28px;
   background: linear-gradient(100deg, color-mix(in srgb, var(--bg) 92%, transparent) 38%, color-mix(in srgb, var(--bg) 35%, transparent) 78%, color-mix(in srgb, var(--bg) 15%, transparent));
 }
-.hero-overlay h2 { font-size: 22px; letter-spacing: -0.01em; max-width: 30ch; color: var(--text); }
-.hero-overlay p { color: var(--muted); font-size: 13.5px; max-width: 42ch; }
+.hero-overlay h2 { font: 700 22px/1.25 var(--font-display); letter-spacing: -0.01em; max-width: 30ch; color: var(--text); }
+.hero-overlay p { color: var(--muted); font-size: 13.5px; font-weight: 500; max-width: 42ch; }
 
 .source-line {
   color: var(--muted);
@@ -377,7 +399,9 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
   border-radius: 999px;
   padding: 2px 10px;
   color: var(--text);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 /* ---------- Weather badge (item 4 — must read in the first seconds) ---------- */
@@ -453,8 +477,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
   width: 52px;
   height: 52px;
   border-radius: 12px;
-  font-size: 26px;
-  font-weight: 800;
+  font: 800 26px var(--font-mono);
   margin-right: 12px;
 }
 .grade-badge.A, .grade-badge.B { background: var(--accent-soft); color: var(--accent); }
@@ -466,8 +489,9 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
 /* ---------- Live loss counter ---------- */
 .accent-card { border-color: var(--red-soft-border); }
 .live-counter-value {
-  font-size: 42px;
-  font-weight: 800;
+  font-family: var(--font-mono);
+  font-size: 40px;
+  font-weight: 700;
   color: var(--red);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -539,7 +563,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
 }
 .cause-row:last-child { border-bottom: none; }
 .cause-row .cause-name { color: var(--text); }
-.cause-row .cause-days { color: var(--muted); font-variant-numeric: tabular-nums; }
+.cause-row .cause-days { color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .cause-row .cause-bar-wrap {
   width: 120px;
   height: 8px;
@@ -578,7 +602,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
 .prov-row:last-child { border-bottom: none; }
 .prov-row .prov-key { color: var(--text); font-weight: 600; }
 .prov-row .prov-note { grid-column: 1 / -1; color: var(--muted); font-size: 12px; margin-top: -4px; }
-.prov-row .prov-value { font-variant-numeric: tabular-nums; color: var(--text); }
+.prov-row .prov-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
 .prov-kind {
   border-radius: 999px;
   padding: 2px 9px;
@@ -620,8 +644,8 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
   gap: 1px;
   transition: background-color 0.25s ease, border-color 0.25s ease;
 }
-.kpi-label { font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-.kpi-value { font-size: 30px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.2; }
+.kpi-label { font-size: 12.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.kpi-value { font-family: var(--font-mono); font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1.2; }
 .kpi-unit { font-size: 12px; color: var(--muted); }
 .kpi.red .kpi-value { color: var(--red); }
 .kpi.amber .kpi-value { color: var(--amber); }
@@ -649,7 +673,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
   gap: 8px;
   margin-bottom: 14px;
 }
-.card h2 { font-size: 16px; letter-spacing: -0.01em; }
+.card h2 { font: 600 16px/1.3 var(--font-display); letter-spacing: -0.01em; }
 
 .legend {
   display: flex;
@@ -825,8 +849,8 @@ main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 64px; }
 }
 .dlegend .swatch { width: 12px; height: 12px; border-radius: 3px; align-self: center; }
 .dlegend .name { color: var(--muted); }
-.dlegend .val { font-variant-numeric: tabular-nums; font-weight: 600; }
-.dlegend .pct { color: var(--muted); font-variant-numeric: tabular-nums; width: 58px; text-align: right; }
+.dlegend .val { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.dlegend .pct { color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; width: 58px; text-align: right; }
 .dlegend .row.waste .name,
 .dlegend .row.waste .val { color: var(--red); }
 
@@ -844,7 +868,8 @@ th {
 tbody tr { transition: background 0.12s; }
 tbody tr:hover { background: var(--surface-2); }
 tbody tr:last-child td { border-bottom: none; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+th.num { text-align: right; }
 td.excess { color: var(--red); font-weight: 650; }
 .empty { color: var(--muted); padding: 10px 0 2px; }
 
@@ -890,7 +915,7 @@ td.excess { color: var(--red); font-weight: 650; }
   font-size: 13.5px;
   color: var(--text);
 }
-.sim-slider-row strong { font-size: 15px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.sim-slider-row strong { font-family: var(--font-mono); font-size: 15px; color: var(--accent); font-variant-numeric: tabular-nums; }
 .sim-slider input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .sim-result {
@@ -905,8 +930,8 @@ td.excess { color: var(--red); font-weight: 650; }
   border: 1px solid var(--accent-soft-border);
   margin-bottom: 16px;
 }
-.sim-result-pct { font-size: 38px; font-weight: 800; color: var(--accent); letter-spacing: -0.02em; line-height: 1; }
-.sim-result-kzt { font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.sim-result-pct { font-family: var(--font-mono); font-size: 34px; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; line-height: 1; }
+.sim-result-kzt { font-family: var(--font-mono); font-size: 20px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 
 .sim-bars { display: flex; flex-direction: column; gap: 10px; }
 .sim-bar-row { display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 10px; }
@@ -915,7 +940,7 @@ td.excess { color: var(--red); font-weight: 650; }
 .sim-bar { height: 100%; border-radius: 7px; transition: width 0.2s ease; }
 .sim-bar-before { background: var(--red); }
 .sim-bar-after { background: var(--accent-grad); }
-.sim-bar-val { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 90px; text-align: right; }
+.sim-bar-val { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 90px; text-align: right; }
 
 /* ---------- Explanation tables (prose-in-table, wraps instead of the default nowrap data-table cells) ---------- */
 .explain-table th, .explain-table td { white-space: normal; vertical-align: top; line-height: 1.5; }
@@ -958,7 +983,7 @@ td.excess { color: var(--red); font-weight: 650; }
   height: 100%;
   justify-content: flex-end;
 }
-.forecast-bars .fbar-val { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.forecast-bars .fbar-val { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .forecast-bars .fbar {
   width: 100%;
   border-radius: 5px 5px 2px 2px;
