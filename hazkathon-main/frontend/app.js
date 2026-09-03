@@ -274,12 +274,21 @@ function render(data) {
 // Each zone maps to one of the fixed hypothesis strings core.diagnose_anomaly_day()
 // produces (see core.py) — a plain lookup, not a new diagnosis of its own.
 const FLOORPLAN_ZONES = [
-  { label: "Серверная", icon: "server", x: 16, y: 14, w: 138, h: 100, match: (h) => h.includes("Электрооборудование") },
-  { label: "Классы / аудитории", icon: "book", x: 168, y: 14, w: 138, h: 100, match: (h) => h.includes("HVAC") },
-  { label: "Столовая, сан.узлы", icon: "drop", x: 320, y: 14, w: 138, h: 100, match: (h) => h.includes("Утечка воды") },
-  { label: "Охрана и освещение", icon: "bulb", x: 472, y: 14, w: 138, h: 100, match: (h) => h.includes("Освещение") },
-  { label: "Котельная / отопление", icon: "flame", x: 168, y: 152, w: 290, h: 84, match: (h) => h.includes("Отопление осталось") },
+  { label: "Серверная", icon: "server", x: 14, y: 12, w: 148, h: 100, match: (h) => h.includes("Электрооборудование") },
+  { label: "Классы / аудитории", icon: "book", x: 162, y: 12, w: 148, h: 100, match: (h) => h.includes("HVAC") },
+  { label: "Столовая, сан.узлы", icon: "drop", x: 310, y: 12, w: 148, h: 100, match: (h) => h.includes("Утечка воды") },
+  { label: "Охрана и освещение", icon: "bulb", x: 458, y: 12, w: 148, h: 100, match: (h) => h.includes("Освещение") },
+  { label: "Котельная / отопление", icon: "flame", x: 162, y: 136, w: 296, h: 82, match: (h) => h.includes("Отопление осталось") },
 ];
+
+// Flat RGB blend — a controlled, opaque tint instead of alpha-compositing a
+// bright status color over a dark surface (which reads muddy on night mode).
+function mixHex(hexA, hexB, t) {
+  const a = parseInt(hexA.replace("#", ""), 16);
+  const b = parseInt(hexB.replace("#", ""), 16);
+  const lerp = (shift) => Math.round(((a >> shift) & 255) + (((b >> shift) & 255) - ((a >> shift) & 255)) * t);
+  return `rgb(${lerp(16)}, ${lerp(8)}, ${lerp(0)})`;
+}
 
 // Small stroke-based pictograms, centered at (cx, cy) — a quiet visual anchor
 // per zone so the diagram reads at a glance, not a full icon library.
@@ -333,34 +342,41 @@ function renderFloorPlan(data) {
     hit: entries.find((e) => zone.match(e.hypothesis)),
   }));
 
-  const W2 = 626, H2 = 250;
+  const W2 = 620, H2 = 232;
+  const outline = { x: 8, y: 6, w: W2 - 16, h: 220 };
   let svg = `<svg viewBox="0 0 ${W2} ${H2}" role="img" aria-label="Схема здания с подсветкой вероятных причин потерь">`;
-  // Faint dashed perimeter — reads as a floor outline without adding visual weight.
-  svg += `<rect x="2" y="2" width="${W2 - 4}" height="${H2 - 4}" rx="16" fill="none" stroke="${INK.border}" stroke-width="1" stroke-dasharray="2 5"/>`;
-  svg += `<rect x="16" y="126" width="${W2 - 32}" height="24" rx="4" fill="${INK.surface}" stroke="${INK.border}"/>`;
-  svg += `<line x1="26" y1="138" x2="${W2 - 26}" y2="138" stroke="${INK.border}" stroke-width="1" stroke-dasharray="5 5"/>`;
-  svg += `<text x="${W2 / 2}" y="142.5" text-anchor="middle" fill="${INK.muted}" font-size="10.5" letter-spacing="0.05em">КОРИДОР</text>`;
+  // One solid building outline — the exterior wall, not a UI card border.
+  svg += `<rect x="${outline.x}" y="${outline.y}" width="${outline.w}" height="${outline.h}" rx="6" fill="none" stroke="${INK.border}" stroke-width="1.5"/>`;
+  // Corridor: a plain interior band, not another bordered card.
+  svg += `<rect x="${outline.x}" y="112" width="${outline.w}" height="24" fill="${INK.surface}"/>`;
+  svg += `<line x1="${outline.x}" y1="112" x2="${outline.x + outline.w}" y2="112" stroke="${INK.border}" stroke-width="1"/>`;
+  svg += `<line x1="${outline.x}" y1="136" x2="${outline.x + outline.w}" y2="136" stroke="${INK.border}" stroke-width="1"/>`;
+  svg += `<text x="${W2 / 2}" y="127.5" text-anchor="middle" fill="${INK.muted}" font-size="10" letter-spacing="0.14em">КОРИДОР</text>`;
 
-  hits.forEach(({ zone, hit }) => {
-    const share = hit ? hit.share_pct : 0;
-    const wash = hit ? Math.min(0.16, 0.05 + share / 400) : 0;
+  hits.forEach(({ zone, hit }, i) => {
     const cx = zone.x + zone.w / 2;
-    const iconCy = zone.y + 28;
-    svg +=
-      `<rect x="${zone.x}" y="${zone.y}" width="${zone.w}" height="${zone.h}" rx="12" ` +
-      `fill="${hit ? COLORS.anomaly : INK.surface}" fill-opacity="${hit ? wash : 1}" stroke="${INK.border}" stroke-width="1"/>`;
+    const iconCy = zone.y + 30;
     if (hit) {
-      // A slim top accent instead of a heavy full-border outline — a status
-      // tick tied to a real diagnosed cause, not decoration.
-      svg += `<rect x="${zone.x + 14}" y="${zone.y}" width="${zone.w - 28}" height="3" rx="1.5" fill="${COLORS.anomaly}"/>`;
+      const tint = mixHex(INK.surface, COLORS.anomaly, 0.1);
+      svg += `<rect x="${zone.x}" y="${zone.y}" width="${zone.w}" height="${zone.h}" fill="${tint}"/>`;
     }
-    svg += zoneIcon(zone.icon, cx, iconCy, hit ? COLORS.anomaly : INK.muted);
+    // Rooms share walls (adjoining edges, no card gap) — each interior
+    // partition drawn once, at its left edge; the boiler room additionally
+    // needs its own right edge since nothing else in the row supplies it.
+    if (i > 0 && i < 4) svg += `<line x1="${zone.x}" y1="${zone.y}" x2="${zone.x}" y2="${zone.y + zone.h}" stroke="${INK.border}" stroke-width="1"/>`;
+    if (i === 4) {
+      svg += `<line x1="${zone.x}" y1="${zone.y}" x2="${zone.x}" y2="${zone.y + zone.h}" stroke="${INK.border}" stroke-width="1"/>`;
+      svg += `<line x1="${zone.x + zone.w}" y1="${zone.y}" x2="${zone.x + zone.w}" y2="${zone.y + zone.h}" stroke="${INK.border}" stroke-width="1"/>`;
+    }
+    if (hit) {
+      // A fixed-position corner dot — a status indicator, not text laid out
+      // around a measured width.
+      svg += `<circle cx="${zone.x + zone.w - 14}" cy="${zone.y + 14}" r="4" fill="${COLORS.anomaly}"/>`;
+    }
+    svg += zoneIcon(zone.icon, cx, iconCy, hit ? INK.text : INK.muted);
     svg += `<text x="${cx}" y="${zone.y + 58}" text-anchor="middle" fill="${hit ? INK.text : INK.muted}" font-size="12" font-weight="${hit ? 700 : 500}">${zone.label}</text>`;
     if (hit) {
-      const pillW = 78;
-      svg +=
-        `<rect x="${cx - pillW / 2}" y="${zone.y + 70}" width="${pillW}" height="20" rx="10" fill="${COLORS.anomaly}" fill-opacity="0.14"/>` +
-        `<text x="${cx}" y="${zone.y + 83.5}" text-anchor="middle" fill="${COLORS.anomaly}" font-size="11" font-weight="700">${hit.days} дн · ${fmt(hit.share_pct, 0)}%</text>`;
+      svg += `<text x="${cx}" y="${zone.y + 76}" text-anchor="middle" fill="${COLORS.anomaly}" font-size="11.5" font-weight="700">${hit.days} дн · ${fmt(hit.share_pct, 0)}%</text>`;
     }
   });
   svg += `</svg>`;
