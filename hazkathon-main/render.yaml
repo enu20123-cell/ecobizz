@@ -10,3 +10,17 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3.6-flash
+
+  - type: worker
+    name: ecobiz-copilot-bot
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false
+      - key: BACKEND_URL
+        value: https://ecobizz.onrender.com
